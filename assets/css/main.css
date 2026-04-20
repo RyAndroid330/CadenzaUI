@@ -1,0 +1,328 @@
+/* ============================================
+   Cadenza — macOS-Inspired Design System
+   ============================================ */
+
+/* --- Fonts --- */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* --- CSS Custom Properties --- */
+:root {
+  /* Typography */
+  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+
+  /* Light mode palette */
+  --mac-bg: #d6d6db;
+  --mac-surface: #ececf0;
+  --mac-surface-secondary: #d0d0d6;
+  --mac-sidebar-bg: rgba(214, 214, 219, 0.85);
+  --mac-header-bg: rgba(230, 230, 235, 0.72);
+  --mac-border: rgba(0, 0, 0, 0.10);
+  --mac-border-strong: rgba(0, 0, 0, 0.16);
+  --mac-text-primary: #232326;
+  --mac-text-secondary: #5a5a5f;
+  --mac-text-tertiary: #8a8a8e;
+  --mac-accent: #007AFF;
+  --mac-accent-hover: #0066d6;
+  --mac-green: #34C759;
+  --mac-orange: #FF9500;
+  --mac-red: #FF3B30;
+  --mac-purple: #AF52DE;
+  --mac-teal: #5AC8FA;
+  --mac-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06);
+  --mac-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08);
+  --mac-shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.16), 0 4px 12px rgba(0, 0, 0, 0.10);
+  --mac-radius-sm: 8px;
+  --mac-radius-md: 12px;
+  --mac-radius-lg: 16px;
+  --mac-radius-xl: 20px;
+  --mac-transition: 200ms ease;
+
+  /* Section colors - softer for macOS feel */
+  --section-system: #007AFF;
+  --section-activity: #FF9500;
+  --section-traces: #5AC8FA;
+  --section-meta: #AF52DE;
+  --section-help: #8E8E93;
+}
+
+/* Dark mode overrides */
+.body--dark {
+  --mac-bg: #1c1c1e;
+  --mac-surface: #2c2c2e;
+  --mac-surface-secondary: #3a3a3c;
+  --mac-sidebar-bg: rgba(44, 44, 46, 0.85);
+  --mac-header-bg: rgba(28, 28, 30, 0.72);
+  --mac-border: rgba(255, 255, 255, 0.08);
+  --mac-border-strong: rgba(255, 255, 255, 0.14);
+  --mac-text-primary: #f5f5f7;
+  --mac-text-secondary: #a1a1a6;
+  --mac-text-tertiary: #636366;
+  --mac-accent: #0A84FF;
+  --mac-accent-hover: #409cff;
+  --mac-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.2);
+  --mac-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.28);
+  --mac-shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.4);
+}
+
+/* --- Global Reset & Base --- */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: var(--font-family) !important;
+  background-color: var(--mac-bg) !important;
+  color: var(--mac-text-primary);
+  margin: 0;
+  padding: 0;
+  transition: background-color var(--mac-transition), color var(--mac-transition);
+}
+
+/* --- Quasar Overrides --- */
+
+/* Cards */
+.q-card {
+  border-radius: var(--mac-radius-md) !important;
+  box-shadow: var(--mac-shadow-sm) !important;
+  border: 1px solid var(--mac-border) !important;
+  background-color: var(--mac-surface) !important;
+  transition: box-shadow var(--mac-transition), transform var(--mac-transition);
+}
+
+.q-card:hover {
+  box-shadow: var(--mac-shadow-md) !important;
+}
+
+/* Buttons */
+.q-btn {
+  border-radius: var(--mac-radius-sm) !important;
+  text-transform: none !important;
+  font-weight: 500 !important;
+  letter-spacing: 0 !important;
+  font-family: var(--font-family) !important;
+  transition: all var(--mac-transition) !important;
+}
+
+.q-btn--flat {
+  border-radius: var(--mac-radius-sm) !important;
+}
+
+.q-btn--round {
+  border-radius: 50% !important;
+}
+
+/* Tables */
+.q-table {
+  font-family: var(--font-family) !important;
+}
+
+.q-table th {
+  font-weight: 600 !important;
+  font-size: 0.8rem !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.04em !important;
+  color: var(--mac-text-secondary) !important;
+  border-bottom: 1px solid var(--mac-border-strong) !important;
+}
+
+.q-table td {
+  font-size: 0.875rem !important;
+  border-bottom: 1px solid var(--mac-border) !important;
+}
+
+.q-table tbody tr:hover {
+  background-color: var(--mac-surface-secondary) !important;
+}
+
+/* Inputs */
+.q-field--outlined .q-field__control {
+  border-radius: var(--mac-radius-sm) !important;
+}
+
+.q-field--filled .q-field__control {
+  border-radius: var(--mac-radius-sm) !important;
+}
+
+/* Select */
+.q-select .q-field__control {
+  border-radius: var(--mac-radius-sm) !important;
+}
+
+/* Dialogs */
+.q-dialog__inner > .q-card {
+  border-radius: var(--mac-radius-lg) !important;
+  box-shadow: var(--mac-shadow-lg) !important;
+}
+
+/* Tooltips */
+.q-tooltip {
+  font-family: var(--font-family) !important;
+  font-size: 0.75rem !important;
+  border-radius: 6px !important;
+  padding: 4px 10px !important;
+  background-color: rgba(0, 0, 0, 0.75) !important;
+  backdrop-filter: blur(12px) !important;
+}
+
+/* Scrollbar - macOS style */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.18);
+  border-radius: 100px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 0, 0, 0.3);
+}
+
+.body--dark ::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.body--dark ::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.35);
+}
+
+/* Linear progress bars */
+.q-linear-progress {
+  border-radius: 100px !important;
+  overflow: hidden;
+}
+
+.q-linear-progress__track {
+  border-radius: 100px !important;
+}
+
+.q-linear-progress__model {
+  border-radius: 100px !important;
+}
+
+/* Badges */
+.q-badge {
+  border-radius: 100px !important;
+  font-weight: 600 !important;
+  font-family: var(--font-family) !important;
+}
+
+/* Expansion items */
+.q-expansion-item {
+  border-radius: var(--mac-radius-sm) !important;
+}
+
+/* Spinners */
+.q-spinner {
+  color: var(--mac-accent) !important;
+}
+
+/* Breadcrumbs */
+.q-breadcrumbs {
+  font-family: var(--font-family) !important;
+  font-size: 0.875rem;
+}
+
+/* Tabs */
+.q-tab {
+  text-transform: none !important;
+  font-weight: 500 !important;
+  letter-spacing: 0 !important;
+}
+
+/* Notifications */
+.q-notification {
+  border-radius: var(--mac-radius-md) !important;
+  backdrop-filter: blur(20px) !important;
+  font-family: var(--font-family) !important;
+}
+
+/* --- Utility Classes --- */
+.mac-glass {
+  background: var(--mac-header-bg) !important;
+  backdrop-filter: blur(20px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+  border-bottom: 1px solid var(--mac-border) !important;
+}
+
+.mac-sidebar-glass {
+  background: var(--mac-sidebar-bg) !important;
+  backdrop-filter: blur(20px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+  border-right: 1px solid var(--mac-border) !important;
+}
+
+.mac-card {
+  background: var(--mac-surface) !important;
+  border: 1px solid var(--mac-border) !important;
+  border-radius: var(--mac-radius-md) !important;
+  box-shadow: var(--mac-shadow-sm) !important;
+}
+
+.mac-surface {
+  background: var(--mac-surface) !important;
+}
+
+.mac-text-primary {
+  color: var(--mac-text-primary) !important;
+}
+
+.mac-text-secondary {
+  color: var(--mac-text-secondary) !important;
+}
+
+.mac-text-tertiary {
+  color: var(--mac-text-tertiary) !important;
+}
+
+/* Smooth page transitions */
+.page-enter-active,
+.page-leave-active {
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+
+.page-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.page-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+/* --- Typography helpers --- */
+.text-title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--mac-text-primary);
+}
+
+.text-section {
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--mac-text-primary);
+}
+
+.text-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--mac-text-secondary);
+}
