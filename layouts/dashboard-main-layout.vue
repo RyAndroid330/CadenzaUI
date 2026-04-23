@@ -109,6 +109,20 @@ function formatBreadcrumbLabel(segment) {
   gap: 4px;
 }
 
+/* Tighter padding on mobile & tablet */
+@media (max-width: 1023px) {
+  .mac-main-layout {
+    padding: 16px 20px;
+  }
+}
+
+@media (max-width: 639px) {
+  .mac-main-layout {
+    padding: 12px 14px;
+    gap: 2px;
+  }
+}
+
 .mac-topbar {
   display: flex;
   align-items: center;
@@ -131,6 +145,13 @@ function formatBreadcrumbLabel(segment) {
   color: var(--mac-text-secondary);
 }
 
+@media (max-width: 639px) {
+  .mac-breadcrumbs {
+    font-size: 0.75rem;
+    padding: 5px 10px;
+  }
+}
+
 .mac-breadcrumbs :deep(a),
 .mac-breadcrumbs :deep(.q-breadcrumbs__el) {
   color: var(--breadcrumb-accent, var(--mac-text-secondary)) !important;
@@ -146,22 +167,10 @@ function formatBreadcrumbLabel(segment) {
 }
 
 /* Section-specific breadcrumb colors */
-.breadcrumb-system {
-  --breadcrumb-accent: var(--section-system);
-  border-color: color-mix(in srgb, var(--section-system) 30%, var(--mac-border));
-}
-.breadcrumb-activity {
-  --breadcrumb-accent: var(--section-activity);
-  border-color: color-mix(in srgb, var(--section-activity) 30%, var(--mac-border));
-}
-.breadcrumb-meta {
-  --breadcrumb-accent: var(--section-meta);
-  border-color: color-mix(in srgb, var(--section-meta) 30%, var(--mac-border));
-}
-.breadcrumb-help {
-  --breadcrumb-accent: var(--section-help);
-  border-color: color-mix(in srgb, var(--section-help) 30%, var(--mac-border));
-}
+.breadcrumb-system  { --breadcrumb-accent: var(--section-system);   border-color: color-mix(in srgb, var(--section-system)   30%, var(--mac-border)); }
+.breadcrumb-activity { --breadcrumb-accent: var(--section-activity); border-color: color-mix(in srgb, var(--section-activity) 30%, var(--mac-border)); }
+.breadcrumb-meta    { --breadcrumb-accent: var(--section-meta);     border-color: color-mix(in srgb, var(--section-meta)     30%, var(--mac-border)); }
+.breadcrumb-help    { --breadcrumb-accent: var(--section-help);     border-color: color-mix(in srgb, var(--section-help)     30%, var(--mac-border)); }
 
 .mac-topbar-actions {
   flex-shrink: 0;
@@ -173,6 +182,13 @@ function formatBreadcrumbLabel(segment) {
   letter-spacing: -0.02em;
   color: var(--mac-text-primary);
   padding: 8px 0 4px;
+}
+
+@media (max-width: 639px) {
+  .mac-page-title {
+    font-size: 1.375rem;
+    padding: 6px 0 2px;
+  }
 }
 
 .mac-page-content {

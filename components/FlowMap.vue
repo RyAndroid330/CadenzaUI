@@ -1,0 +1,789 @@
+<template>
+  <div ref="containerRef" :class="['vue-flow-container q-mb-md', { 'full-width': props.fullWidth, 'fullscreen-mode': isFullscreen }, fullscreenPolkaClass]">
+    <div class="zoom-slider" :class="{ 'dark-mode': $q.dark.isActive }" aria-hidden="false" v-if="showZoomSlider">
+      <label class="zoom-label">Zoom</label>
+      <input
+        type="range"
+        v-model.number="zoom"
+        :min="minZoom"
+        :max="maxZoom"
+        step="0.01"
+        aria-label="Zoom slider"
+      />
+      <span class="zoom-value">{{ Math.round(zoom * 100) }}%</span>
+      <q-btn
+        flat
+        dense
+        round
+        icon="fit_screen"
+        @click="fitToWindow"
+        class="q-ml-md"
+        title="Fit to Window"
+      />
+      <q-btn
+        flat
+        dense
+        round
+        :icon="isFullscreen ? 'fullscreen_exit' : 'fullscreen'"
+        @click="toggleFullscreen"
+        class="q-ml-xs"
+        title="Toggle Fullscreen"
+      />
+    </div>
+    <div
+      v-if="tooltipVisible"
+      class="wheel-tooltip"
+      :style="{ left: tooltipX + 'px', top: tooltipY + 'px' }"
+      role="status"
+      aria-live="polite"
+    >
+      Hold Ctrl and scroll to zoom
+    </div>
+    <VueFlow
+      ref="vueFlowInstance"
+      :nodes="nodes"
+      :edges="edges"
+      @node-click="onNodeClick"
+      :min-zoom="minZoom"
+      :max-zoom="maxZoom"
+      :zoom-on-scroll="false"
+      fit-view-on-init
+      contenteditable="false"
+      :nodes-draggable="false"
+    >
+      <template #node-custom="props">
+        <CustomNode
+          :data="props.data"
+          @node-hover="handleNodeHover"
+          @node-unhover="handleNodeUnhover"
+        />
+      </template>
+    </VueFlow>
+
+    <q-linear-progress
+      v-if="progressBarVisible"
+      class="bottom-progress"
+      :color="sectionColor"
+      size="10px"
+      :value="progress"
+    />
+
+  </div>
+</template>
+
+<script setup lang="ts">
+import CustomNode from '~/components/CustomNode.vue';
+import { ref, watch, nextTick, onMounted, onUnmounted, computed } from 'vue';
+import { VueFlow, type Node, type Edge, type Position } from '@vue-flow/core';
+import ELK from 'elkjs/lib/elk.bundled.js';
+import { useAppStore } from '~/stores/app';
+import { useQuasar, colors } from 'quasar';
+
+interface FlowItem {
+  id?: string;
+  label?: string;
+  description?: string;
+  errored?: boolean;
+  failed?: boolean;
+  isUnique?: boolean;
+  previousId?: string | string[];
+  previousTaskExecutionId?: string | string[];
+  previousExecutions?: Array<{
+    previousTaskExecutionId: string;
+    previousTaskName: string;
+  }>;
+  [key: string]: unknown;
+}
+
+const props = defineProps<{
+  items: FlowItem[];
+  idField?: string;
+  labelField?: string;
+  previousField?: string;
+  fullWidth?: boolean;
+  // Optional loading progress (0..1) and visibility
+  progress?: number;
+  progressVisible?: boolean;
+}>();
+
+const emit = defineEmits<{
+  'item-selected': [item: FlowItem];
+}>();
+
+const router = useRouter();
+
+const nodes = ref<Node[]>([]);
+const edges = ref<Edge[]>([]);
+const vueFlowInstance = ref<InstanceType<typeof VueFlow> | null>(null);
+const containerRef = ref<HTMLElement | null>(null);
+const tooltipVisible = ref(false);
+const tooltipX = ref(0);
+const tooltipY = ref(0);
+const isFullscreen = ref(false);
+const hoveredNodeId = ref<string | null>(null);
+const filteredChain = ref<{ nodeIds: Set<string>; edgeIds: Set<string> } | null>(null);
+let fullNodesBackup: Node[] = [];
+let fullEdgesBackup: Edge[] = [];
+let tooltipTimer: ReturnType<typeof setTimeout> | null = null;
+const $q = useQuasar();
+
+const fullscreenPolkaClass = computed(() => {
+  if (!isFullscreen.value) return '';
+  return $q && $q.dark.isActive ? 'polka-dark' : 'polka-light';
+});
+
+function fitToWindow() {
+  if (!vueFlowInstance.value) return;
+  const api = vueFlowInstance.value as any;
+  if (typeof api.fitView === 'function') {
+    try {
+      api.fitView({ padding: 0.1, maxZoom: 1 });
+    } catch (err) {
+      console.error('Error fitting view:', err);
+    }
+  }
+}
+
+function toggleFullscreen() {
+  isFullscreen.value = !isFullscreen.value;
+  if (isFullscreen.value) {
+    document.body.style.overflow = 'hidden';
+  } else {
+    document.body.style.overflow = '';
+  }
+}
+
+function showTooltipAt(clientX: number, clientY: number) {
+  const el = containerRef.value;
+  if (!el) return;
+  const rect = el.getBoundingClientRect();
+  // position tooltip slightly above the cursor, constrained inside container
+  const x = Math.min(Math.max(8, clientX - rect.left - 40), rect.width - 120);
+  const y = Math.min(Math.max(8, clientY - rect.top - 40), rect.height - 36);
+  tooltipX.value = x;
+  tooltipY.value = y;
+  tooltipVisible.value = true;
+  if (tooltipTimer) clearTimeout(tooltipTimer);
+  tooltipTimer = setTimeout(() => {
+    tooltipVisible.value = false;
+    tooltipTimer = null;
+  }, 1500);
+}
+const minZoom = 0.05;
+const maxZoom = 1.5;
+const zoom = ref<number>(1);
+
+watch(zoom, async (val) => {
+  if (!vueFlowInstance.value) return;
+  const api = vueFlowInstance.value as any;
+  if (typeof api.zoomTo === 'function') {
+    try {
+      await api.zoomTo(val);
+    } catch (err) {
+    }
+  } else if (typeof api.setViewport === 'function') {
+    try {
+      await api.setViewport({ x: 0, y: 0, zoom: val });
+    } catch (err) {
+    }
+  }
+});
+
+onMounted(async () => {
+  await nextTick();
+  if (!vueFlowInstance.value) return;
+  const api = vueFlowInstance.value as any;
+  try {
+    const vp = typeof api.getViewport === 'function' ? await api.getViewport() : null;
+    if (vp && typeof vp.zoom === 'number') {
+      zoom.value = vp.zoom;
+    }
+  } catch (err) {
+  }
+});
+
+onMounted(async () => {
+  await nextTick();
+  // Attach ctrl+wheel zoom handler to container
+  const el = containerRef.value;
+  if (!el) return;
+
+  const wheelHandler = (ev: WheelEvent) => {
+    if (ev.ctrlKey) {
+      ev.preventDefault();
+      // Use exponential scale for smooth zooming
+      const factor = Math.pow(1.2, -ev.deltaY / 100);
+      const newZoom = Math.max(minZoom, Math.min(maxZoom, zoom.value * factor));
+      zoom.value = newZoom;
+      return;
+    }
+
+    // If user scrolled without Ctrl, show a brief tooltip near the cursor
+    try {
+      showTooltipAt(ev.clientX, ev.clientY);
+    } catch (err) {
+      // ignore positioning errors
+    }
+    // do not prevent default - allow normal scrolling
+  };
+
+  el.addEventListener('wheel', wheelHandler as EventListener, { passive: false });
+
+  const keyHandler = (ev: KeyboardEvent) => {
+    if (ev.code === 'Space') {
+      // If filter is active, restore regardless of hover state
+      if (filteredChain.value) {
+        ev.preventDefault();
+        // Restore full node/edge list
+        nodes.value = fullNodesBackup;
+        edges.value = fullEdgesBackup;
+        filteredChain.value = null;
+        fullNodesBackup = [];
+        fullEdgesBackup = [];
+        updateNodeStates();
+        return;
+      }
+
+      // If hovering, create filter
+      if (hoveredNodeId.value) {
+        ev.preventDefault();
+        // Store current state and filter to chain
+        const chainNodeIds = getConnectedNodes(hoveredNodeId.value);
+        chainNodeIds.add(hoveredNodeId.value); // Include the hovered node
+
+        // Backup current nodes/edges
+        fullNodesBackup = [...nodes.value];
+        fullEdgesBackup = [...edges.value];
+
+        // Filter edges to only those within the chain
+        const chainEdgeIds = new Set<string>();
+        edges.value.forEach(edge => {
+          if (chainNodeIds.has(edge.source as string) && chainNodeIds.has(edge.target as string)) {
+            chainEdgeIds.add(edge.id);
+          }
+        });
+
+        // Store filtered chain info
+        filteredChain.value = { nodeIds: chainNodeIds, edgeIds: chainEdgeIds };
+
+        // Apply filter
+        nodes.value = nodes.value.filter(node => chainNodeIds.has(node.id));
+        edges.value = edges.value.filter(edge => chainEdgeIds.has(edge.id));
+        updateNodeStates();
+      }
+    }
+  };
+
+  window.addEventListener('keydown', keyHandler);
+
+  onUnmounted(() => {
+    try {
+      el.removeEventListener('wheel', wheelHandler as EventListener);
+      window.removeEventListener('keydown', keyHandler);
+    } catch (err) {
+    }
+  });
+});
+
+const getId = (item: FlowItem): string => {
+  const idField = props.idField || 'name';
+  return String(
+    ((item as any)[idField] as string) || (item as any)['uuid'] || item.id || ''
+  );
+};
+
+const getLabel = (item: FlowItem): string => {
+  const labelField = props.labelField || 'label';
+  return String(
+    (item as any)[labelField] ||
+    (item as any).label ||
+    (item as any).name ||
+    item.id ||
+    (item as any)['uuid'] ||
+    getId(item)
+  );
+};
+
+const getPreviousIds = (item: FlowItem): string[] => {
+  const previousField = props.previousField || 'previousId';
+
+  if (item.previousExecutions && Array.isArray(item.previousExecutions)) {
+    return item.previousExecutions
+      .map((exec) => (exec.previousTaskExecutionId ?? exec.previousTaskName) as string)
+      .filter((id) => id != null);
+  }
+
+  const possibleArrayFields = [
+    item.previousTaskExecutionId,
+    (item as any).previousTaskExecutionIds,
+    item[previousField],
+  ];
+
+  for (const arrayField of possibleArrayFields) {
+    if (Array.isArray(arrayField)) {
+      return arrayField.filter((id) => id != null);
+    }
+  }
+
+  const singleValue =
+    item[previousField] || item.previousTaskExecutionId || item.previousId || null;
+  return singleValue ? [singleValue as string] : [];
+};
+
+const elk = new ELK();
+async function createLayout(nodes: Node[], edges: Edge[]) {
+  const elkGraph = {
+    id: 'root',
+    layoutOptions: {
+      'elk.algorithm': 'layered',
+      'elk.direction': 'RIGHT',
+      'elk.layered.spacing.edgeNodeBetweenLayers': '30',
+      'elk.spacing.nodeNode': '60',
+      'elk.layered.nodePlacement.strategy': 'SIMPLE',
+    },
+    children: nodes.map((node) => ({
+      id: node.id,
+      width: 120,
+      height: 50,
+    })),
+    edges: edges.map((edge) => ({
+      id: edge.id,
+      sources: [edge.source],
+      targets: [edge.target],
+    })),
+  };
+
+  const layouted = await elk.layout(elkGraph);
+
+  try {
+    const isolatedIds = new Set(nodes.map((n) => n.id));
+    for (const e of edges) {
+      isolatedIds.delete(e.source as string);
+      isolatedIds.delete(e.target as string);
+    }
+    const layoutChildren = layouted.children ?? [];
+
+    if (isolatedIds.size > 1) {
+      const extraSpacing = 120;
+      const isolatedLayoutNodes = layoutChildren
+        .filter((n: any) => isolatedIds.has(n.id))
+        .sort((a: any, b: any) => (a.x ?? 0) - (b.x ?? 0));
+
+      isolatedLayoutNodes.forEach((ln: any, idx: number) => {
+        ln.x = (ln.x ?? 0) + idx * extraSpacing;
+      });
+    }
+
+    const rowTolerance = 12; 
+    const minHorizontalGap = 80;
+
+    const byRow = new Map<number, any[]>();
+    for (const n of layoutChildren) {
+      const y = Math.round((n.y ?? 0) / rowTolerance) * rowTolerance;
+      const arr = byRow.get(y) || [];
+      arr.push(n);
+      byRow.set(y, arr);
+    }
+
+    for (const [, rowNodes] of byRow) {
+      if (rowNodes.length <= 1) continue;
+      rowNodes.sort((a: any, b: any) => (a.x ?? 0) - (b.x ?? 0));
+      for (let i = 1; i < rowNodes.length; i++) {
+        const prev = rowNodes[i - 1];
+        const cur = rowNodes[i];
+        const prevRight = (prev.x ?? 0) + (prev.width ?? 120);
+        const desiredX = prevRight + minHorizontalGap;
+        if ((cur.x ?? 0) < desiredX) {
+          const shift = desiredX - (cur.x ?? 0);
+          cur.x = (cur.x ?? 0) + shift;
+          for (let j = i + 1; j < rowNodes.length; j++) {
+            rowNodes[j].x = (rowNodes[j].x ?? 0) + shift;
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to adjust isolated node spacing:', err);
+  }
+
+  return nodes.map((node) => {
+    const layoutNode = (layouted.children ?? []).find((n) => n.id === node.id);
+    return {
+      ...node,
+      position: layoutNode
+        ? { x: layoutNode.x ?? 0, y: layoutNode.y ?? 0 }
+        : { x: 0, y: 0 },
+    };
+  });
+}
+async function processFlowItems(items: FlowItem[]) {
+  if (!items || items.length === 0) {
+    nodes.value = [];
+    edges.value = [];
+    return;
+  }
+
+  const nodeMap = new Map<string, Node>();
+  const newEdges: Edge[] = [];
+
+
+  items.forEach((item: FlowItem) => {
+    const nodeId = getId(item);
+    const nodeData = {
+      label: getLabel(item),
+      uuid: nodeId,
+      description: item.description || '',
+      is_unique: item.isUnique || item.is_unique || false,
+      concurrency: 1,
+      isSelected: item.isSelected || false,
+      errored: item.errored ?? false,
+      failed: item.failed ?? false,
+      isRunning: item.is_running ?? false,
+      isScheduled: item.is_scheduled ?? false,
+      signal:
+        item.signal === true ||
+        (item as any).nodeType === 'signal' ||
+        (item as any).type === 'signal' ||
+        String(nodeId).startsWith('signal::'),
+      item: item,
+    };
+
+    if (!nodeMap.has(nodeId)) {
+      nodeMap.set(nodeId, {
+        id: nodeId,
+        type: 'custom',
+        position: { x: 0, y: 0 },
+        data: nodeData,
+      });
+    }
+  });
+
+  items.forEach((item: FlowItem) => {
+    const nodeId = getId(item);
+    const previousIds = getPreviousIds(item);
+
+    previousIds.forEach((previousId: string) => {
+      if (!previousId || !nodeMap.has(previousId)) {
+        return;
+      }
+      const sourceId = previousId;
+      const targetId = nodeId;
+      const sourceNode = nodeMap.get(sourceId);
+      const targetNode = nodeMap.get(targetId);
+      const isSignal = Boolean(
+        (sourceNode && (sourceNode.data as any)?.signal) ||
+        (targetNode && (targetNode.data as any)?.signal)
+      );
+
+      newEdges.push({
+        id: `${sourceId}-${targetId}`,
+        source: sourceId,
+        target: targetId,
+        data: { signal: isSignal },
+        style: { strokeWidth: 2 },
+        animated: false,
+        class: isSignal ? 'edge-traffic-signal' : 'edge-traffic-neutral',
+      });
+    });
+  });
+
+  const finalEdges = newEdges.map(edge => {
+    const isSignal = edge.data?.signal || false;
+    const cssClass = isSignal ? 'edge-traffic-signal' : 'edge-traffic-neutral';
+    return {
+      ...edge,
+      class: cssClass,
+      style: { strokeWidth: 2 }
+    };
+  });
+
+  const layoutedNodes = await createLayout(Array.from(nodeMap.values()), finalEdges);
+  nodes.value = layoutedNodes;
+  edges.value = finalEdges;
+
+  try {
+    await nextTick();
+    await new Promise((r) => setTimeout(r, 30));
+    if (vueFlowInstance.value && typeof (vueFlowInstance.value as any).fitView === 'function') {
+      try {
+        (vueFlowInstance.value as any).fitView({ padding: 0.05 });
+        await syncZoomFromViewport();
+      } catch (err) {
+        console.warn('fitView failed:', err);
+      }
+    }
+  } catch (err) {
+  }
+}
+
+import type { NodeMouseEvent } from '@vue-flow/core';
+function onNodeClick(event: NodeMouseEvent) {
+  const clickedNode = event.node;
+  if (clickedNode?.data?.item) {
+    emit('item-selected', clickedNode.data.item as FlowItem);
+  }
+}
+
+function getConnectedNodes(nodeId: string): Set<string> {
+  const connected = new Set<string>();
+
+  // Get all ancestors (backward traversal)
+  const getAncestors = (id: string) => {
+    const incomingEdges = edges.value.filter(e => e.target === id);
+    incomingEdges.forEach(edge => {
+      const sourceId = edge.source as string;
+      if (!connected.has(sourceId)) {
+        connected.add(sourceId);
+        getAncestors(sourceId);
+      }
+    });
+  };
+
+  // Get all descendants (forward traversal)
+  const getDescendants = (id: string) => {
+    const outgoingEdges = edges.value.filter(e => e.source === id);
+    outgoingEdges.forEach(edge => {
+      const targetId = edge.target as string;
+      if (!connected.has(targetId)) {
+        connected.add(targetId);
+        getDescendants(targetId);
+      }
+    });
+  };
+
+  getAncestors(nodeId);
+  getDescendants(nodeId);
+
+  return connected;
+}
+
+function handleNodeHover(nodeId: string) {
+  hoveredNodeId.value = nodeId;
+  updateNodeStates();
+}
+
+function handleNodeUnhover() {
+  hoveredNodeId.value = null;
+  updateNodeStates();
+}
+
+function updateNodeStates() {
+  const hovered = hoveredNodeId.value;
+  const chainNodeIds = hovered ? getConnectedNodes(hovered) : new Set<string>();
+
+  nodes.value = nodes.value.map(node => ({
+    ...node,
+    data: {
+      ...node.data,
+      isHovered: node.id === hovered,
+      isInChain: chainNodeIds.has(node.id),
+    },
+  }));
+}
+
+const progress = computed(() => {
+  const v = props.progress;
+  if (typeof v !== 'number') return 0;
+  if (!Number.isFinite(v)) return 0;
+  return Math.max(0, Math.min(1, v));
+});
+const progressBarVisible = computed(() => {
+  return Boolean(props.progressVisible) && progress.value > 0 && progress.value < 1;
+});
+
+// Show zoom slider only when not loading
+const showZoomSlider = computed(() => !progressBarVisible.value);
+
+async function syncZoomFromViewport() {
+  try {
+    await nextTick();
+    const api = vueFlowInstance.value as any;
+    if (api && typeof api.getViewport === 'function') {
+      const vp = await api.getViewport();
+      if (vp && typeof vp.zoom === 'number') {
+        zoom.value = vp.zoom;
+      }
+    }
+  } catch {}
+}
+
+// When loading completes (progress bar hides), align slider with actual viewport
+watch(progressBarVisible, async (isVisible) => {
+  if (!isVisible) {
+    await syncZoomFromViewport();
+  }
+});
+
+// Color tied to current section
+const appStore = useAppStore();
+const sectionColor = computed(() => {
+  switch (appStore.currentSection) {
+    case 'system':
+      return 'primary';
+    case 'serviceActivity':
+      return 'warning';
+    case 'traces':
+      return 'secondary';
+    case 'meta':
+      return 'accent';
+    case 'help':
+      return 'grey-8';
+    default:
+      return 'secondary';
+  }
+});
+const sectionNodeBg = computed(() => {
+  switch (appStore.currentSection) {
+    case 'system':
+      return colors.changeAlpha(colors.getPaletteColor('primary'), 0.6);
+    case 'serviceActivity':
+      return colors.changeAlpha(colors.getPaletteColor('warning'), 0.6);
+    case 'traces':
+      return colors.changeAlpha(colors.getPaletteColor('secondary'), 0.6);
+    case 'meta':
+      return colors.changeAlpha(colors.getPaletteColor('accent'), 0.6);
+    case 'help':
+      return colors.changeAlpha(colors.getPaletteColor('grey-8'), 0.6);
+    default:
+      return colors.changeAlpha(colors.getPaletteColor('secondary'), 0.6);
+  }
+});
+
+watch(
+  () => props.items,
+  (newItems) => {
+    if (!newItems || newItems.length === 0) {
+      console.warn('Received empty items array. Skipping processing.');
+      nodes.value = [];
+      edges.value = [];
+      return;
+    }
+    processFlowItems(newItems);
+  },
+  { immediate: true, deep: true }
+);
+</script>
+
+<style scoped>
+.vue-flow-container {
+  position: relative;
+  min-width: 50dvw;
+  max-width: 80dvw;
+  height: 50dvh;
+  box-shadow: 0 1px 6px 0 rgba(105, 105, 105, 0.5);
+  border-radius: 20px;
+  margin: 10px;
+}
+
+.vue-flow-container.full-width {
+  min-width: auto;
+  max-width: none;
+  width: 100%;
+}
+
+.vue-flow-container.fullscreen-mode {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100%;
+  min-width: 100%;
+  max-width: 100%;
+  margin: 0;
+  border-radius: 0;
+  z-index: 9999;
+  background-attachment: fixed;
+  background-position: center;
+}
+
+.vue-flow-container.polka-light {
+  background-image: radial-gradient(rgb(168, 167, 167) 5%, transparent 5%);
+  background-position: 4px 4px;
+  background-size: 19px 19px;
+  background-color: rgb(255, 255, 255);
+}
+
+.vue-flow-container.polka-dark {
+  background-image: radial-gradient(rgb(87, 87, 87) 5%, transparent 5%);
+  background-position: 4px 4px;
+  background-size: 19px 19px;
+  background-color: rgb(0, 0, 0);
+}
+
+.zoom-slider {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  padding: 6px 10px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 1px 6px rgba(0,0,0,0.08);
+  z-index: 10;
+}
+.zoom-slider.dark-mode {
+  background: rgba(30, 30, 30, 0.92);
+}
+.zoom-slider .zoom-label {
+  font-size: 12px;
+  color: #444;
+}
+.zoom-slider.dark-mode .zoom-label {
+  color: #bbb;
+}
+.zoom-slider input[type="range"] {
+  width: 120px;
+}
+.zoom-slider .zoom-value {
+  font-size: 12px;
+  color: #333;
+  min-width: 36px;
+  text-align: right;
+}
+.zoom-slider.dark-mode .zoom-value {
+  color: #aaa;
+}
+:deep(.zoom-slider .q-btn) {
+  color: #444;
+}
+:deep(.zoom-slider.dark-mode .q-btn) {
+  color: #bbb;
+}
+
+.wheel-tooltip {
+  position: absolute;
+  z-index: 20;
+  background: rgba(0, 0, 0, 0.78);
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  pointer-events: none;
+  transform: translateY(-6px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.bottom-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-bottom-left-radius: 20px;
+  border-bottom-right-radius: 20px;
+}
+
+/* Traffic edge colors */
+.edge-traffic-neutral {
+  --vue-flow-edge-stroke: #9E9E9E !important;
+  --vue-flow-edge-stroke-selected: #9E9E9E !important;
+}
+
+.edge-traffic-signal {
+  --vue-flow-edge-stroke: #2196F3 !important;
+  --vue-flow-edge-stroke-selected: #2196F3 !important;
+}
+</style>

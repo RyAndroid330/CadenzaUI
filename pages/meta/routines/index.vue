@@ -1,14 +1,18 @@
 <template>
   <NuxtLayout name="dashboard-layout">
     <NuxtLayout name="dashboard-main-layout">
-      <template #title>Routines</template>
+      <template #title>Routines (Meta)</template>
       <div class="row q-mx-md">
         <Table
           :columns="columns"
           :rows="routines"
-          row-key="uuid"
-          inspect-base-path="/meta/routines"
-          :has-more-data="false"
+          row-key="name"
+          @inspect-row="inspectRoutine"
+          @inspect-row-in-new-tab="inspectInNewTab"
+          :enableInfiniteScroll="true"
+          :hasMoreData="hasMoreData"
+          :loadingMoreData="loadingMoreData"
+          @loadMoreData="loadMoreRoutines"
         />
       </div>
     </NuxtLayout>
@@ -16,13 +20,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue';
+import { ref, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 import { useAppStore } from '~/stores/app';
+import Cadenza from '@cadenza.io/core';
 
-const appStore = useAppStore();
-onMounted(() => {
-  appStore.setCurrentSection('meta');
-});
+const router = useRouter();
+const routines = ref<any[]>([]);
+const hasMoreData = ref(false);
+const loadingMoreData = ref(false);
 
 const columns = [
   { name: 'name',        label: 'Name',        field: 'name',        align: 'left' as const, sortable: true },
@@ -31,9 +37,29 @@ const columns = [
   { name: 'version',     label: 'Version',     field: 'version',     align: 'left' as const, sortable: true },
 ];
 
-const { data } = await useAsyncData('meta-routines', () =>
-  $fetch<{ routines: any[] }>('/api/meta/routines'),
-);
+function inspectRoutine(r: any) {
+  router.push(`/meta/routines/${encodeURIComponent(r.name)}`);
+}
+function inspectInNewTab(r: any) {
+  window.open(`/meta/routines/${encodeURIComponent(r.name)}`, '_blank');
+}
 
-const routines = computed(() => data.value?.routines ?? []);
+const fetchRoutinesTask = Cadenza.createTask('Fetch Meta Routines', async (context) => {
+  try {
+    const data: any = await $fetch('/api/meta/routines');
+    routines.value = Array.isArray(data?.routines) ? data.routines : [];
+    hasMoreData.value = false;
+  } catch (e) {
+    console.error(e);
+  }
+  return context;
+});
+
+function loadMoreRoutines() {}
+
+onMounted(() => {
+  const appStore = useAppStore();
+  appStore.setCurrentSection('meta');
+  Cadenza.run(Cadenza.createRoutine('Init Meta Routines', [fetchRoutinesTask], ''), {});
+});
 </script>

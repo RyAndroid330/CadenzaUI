@@ -8,13 +8,10 @@ export default defineEventHandler(async (event) => {
   const address = String(config.cadenzaServerAddress ?? 'http://cadenza-db.localhost');
   const port = Number(config.cadenzaServerPort ?? 80);
 
-  const q = getQuery(event);
-  const limit = Math.min(parseInt((q.limit as string) || '200', 10) || 200, 500);
-
   const rows = await delegateQuery<Record<string, unknown>>(address, port, 'Query service', {
     filter: { is_meta: false },
     sort: { name: 'asc' },
-    limit,
+    limit: 500,
   });
 
   return {

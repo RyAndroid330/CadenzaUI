@@ -154,7 +154,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import { useAppStore } from '~/stores/app';
@@ -170,6 +170,7 @@ const { openLinkInNewTab } = useOpenLinkInNewTab();
 const drawerOpen = ref(true);
 const miniState = ref(false);
 
+// Navigation data
 const navItems = [
   { label: 'Home', path: '/', section: 'home', icon: 'home' },
   { label: 'System', path: '/system', section: 'system', icon: 'dns' },
@@ -206,6 +207,7 @@ const helpItems = [
   { label: 'FAQ', path: '/help/faq', icon: 'quiz' },
 ];
 
+// Methods
 const navigateTo = (path, section) => {
   appStore.setCurrentSection(section);
   if (miniState.value) miniState.value = false;

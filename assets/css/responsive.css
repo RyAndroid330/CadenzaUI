@@ -1,0 +1,112 @@
+/* ============================================================
+   Cadenza — Responsive additions
+   Append these rules to the bottom of assets/css/main.css
+   ============================================================ */
+
+/* ── Touch target minimums (mobile / tablet) ────────────────
+   All interactive Quasar elements get a minimum 44px hit area
+   on screens narrower than 1024px.                           */
+@media (max-width: 1023px) {
+  .q-btn {
+    min-height: 44px !important;
+  }
+
+  .q-btn--round {
+    min-height: 40px !important;
+    min-width: 40px !important;
+  }
+
+  .q-item {
+    min-height: 48px !important;
+  }
+
+  .q-tab {
+    min-height: 48px !important;
+  }
+
+  .q-field__control {
+    min-height: 44px !important;
+  }
+
+  /* Larger table rows for easier tapping */
+  .q-table td,
+  .q-table th {
+    padding: 12px 14px !important;
+  }
+}
+
+/* ── Sidebar responsive widths ──────────────────────────────
+   Tablet (640–1023px): sidebar narrower, no mini toggle shown.
+   Mobile (<640px): sidebar is hidden; bottom tab bar takes over. */
+@media (max-width: 1023px) and (min-width: 640px) {
+  /* Slightly tighter nav items for the 200px tablet sidebar */
+  .mac-nav-item {
+    padding: 8px 8px !important;
+    font-size: 0.75rem !important;
+  }
+
+  .mac-nav-label {
+    font-size: 0.625rem !important;
+    padding: 0 8px 4px !important;
+  }
+}
+
+/* ── Card grid responsive breakpoints ──────────────────────
+   Applied globally so all page grids collapse consistently. */
+@media (max-width: 767px) {
+  /* 2-col grids → 1 col */
+  [class*="mac-home-grid"],
+  [class*="mac-home-stats-row"],
+  [class*="mac-stats-row"],
+  [class*="mac-grid-2"] {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ── Scrollbars — thinner on touch devices ─────────────────*/
+@media (max-width: 1023px) {
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+}
+
+/* ── Table horizontal scroll on small screens ──────────────*/
+@media (max-width: 639px) {
+  .q-table__container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .q-table {
+    min-width: 480px;
+  }
+}
+
+/* ── Typography scale-down on mobile ───────────────────────*/
+@media (max-width: 639px) {
+  .text-title {
+    font-size: 1.375rem !important;
+  }
+
+  .text-section {
+    font-size: 1.0625rem !important;
+  }
+}
+
+/* ── Quasar card padding tighter on mobile ─────────────────*/
+@media (max-width: 639px) {
+  .q-card__section {
+    padding: 14px !important;
+  }
+}
+
+/* ── InfoCard responsive ────────────────────────────────────
+   Remove the min-width constraint so InfoCards can fit in
+   single-column mobile layouts.                             */
+@media (max-width: 639px) {
+  .mac-info-card {
+    min-width: 0 !important;
+    max-height: none !important;
+  }
+}

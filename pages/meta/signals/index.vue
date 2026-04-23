@@ -1,14 +1,18 @@
 <template>
   <NuxtLayout name="dashboard-layout">
     <NuxtLayout name="dashboard-main-layout">
-      <template #title>Signals</template>
+      <template #title>Signals (Meta)</template>
       <div class="row q-mx-md">
         <Table
           :columns="columns"
           :rows="signals"
           row-key="name"
-          inspect-base-path="/meta/signals"
-          :has-more-data="false"
+          @inspect-row="inspectSignal"
+          @inspect-row-in-new-tab="inspectInNewTab"
+          :enableInfiniteScroll="true"
+          :hasMoreData="hasMoreData"
+          :loadingMoreData="loadingMoreData"
+          @loadMoreData="loadMoreSignals"
         />
       </div>
     </NuxtLayout>
@@ -16,13 +20,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue';
+import { ref, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 import { useAppStore } from '~/stores/app';
+import Cadenza from '@cadenza.io/core';
 
-const appStore = useAppStore();
-onMounted(() => {
-  appStore.setCurrentSection('meta');
-});
+const router = useRouter();
+const signals = ref<any[]>([]);
+const hasMoreData = ref(false);
+const loadingMoreData = ref(false);
 
 const columns = [
   { name: 'name',     label: 'Name',   field: 'name',     align: 'left' as const, sortable: true },
@@ -31,9 +37,29 @@ const columns = [
   { name: 'isGlobal', label: 'Global', field: 'isGlobal', align: 'left' as const, sortable: true },
 ];
 
-const { data } = await useAsyncData('meta-signals', () =>
-  $fetch<{ signals: any[] }>('/api/meta/signals'),
-);
+function inspectSignal(s: any) {
+  router.push(`/meta/signals/${encodeURIComponent(s.name)}`);
+}
+function inspectInNewTab(s: any) {
+  window.open(`/meta/signals/${encodeURIComponent(s.name)}`, '_blank');
+}
 
-const signals = computed(() => data.value?.signals ?? []);
+const fetchSignalsTask = Cadenza.createTask('Fetch Meta Signals', async (context) => {
+  try {
+    const data: any = await $fetch('/api/meta/signals');
+    signals.value = Array.isArray(data?.signals) ? data.signals : [];
+    hasMoreData.value = false;
+  } catch (e) {
+    console.error(e);
+  }
+  return context;
+});
+
+function loadMoreSignals() {}
+
+onMounted(() => {
+  const appStore = useAppStore();
+  appStore.setCurrentSection('meta');
+  Cadenza.run(Cadenza.createRoutine('Init Meta Signals', [fetchSignalsTask], ''), {});
+});
 </script>

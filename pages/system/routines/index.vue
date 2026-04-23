@@ -6,9 +6,13 @@
         <Table
           :columns="columns"
           :rows="routines"
-          row-key="uuid"
-          inspect-base-path="/system/routines"
-          :has-more-data="false"
+          row-key="name"
+          @inspect-row="inspectRoutine"
+          @inspect-row-in-new-tab="inspectInNewTab"
+          :enableInfiniteScroll="true"
+          :hasMoreData="hasMoreData"
+          :loadingMoreData="loadingMoreData"
+          @loadMoreData="loadMoreRoutines"
         />
       </div>
     </NuxtLayout>
@@ -16,24 +20,45 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue';
+import { ref, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 import { useAppStore } from '~/stores/app';
+import Cadenza from '@cadenza.io/core';
 
-const appStore = useAppStore();
-onMounted(() => {
-  appStore.setCurrentSection('system');
-});
+const router = useRouter();
+const routines = ref<any[]>([]);
+const hasMoreData = ref(false);
+const loadingMoreData = ref(false);
 
 const columns = [
   { name: 'name',        label: 'Name',        field: 'name',        align: 'left' as const, sortable: true },
-  { name: 'description', label: 'Description', field: 'description', align: 'left' as const },
-  { name: 'service',     label: 'Service',     field: 'service',     align: 'left' as const, sortable: true },
   { name: 'version',     label: 'Version',     field: 'version',     align: 'left' as const, sortable: true },
+  { name: 'service',     label: 'Service',     field: 'service',     align: 'left' as const, sortable: true },
 ];
 
-const { data } = await useAsyncData('system-routines', () =>
-  $fetch<{ routines: any[] }>('/api/system/routines'),
-);
+function inspectRoutine(r: any) {
+  router.push(`/system/routines/${encodeURIComponent(r.name)}`);
+}
+function inspectInNewTab(r: any) {
+  window.open(`/system/routines/${encodeURIComponent(r.name)}`, '_blank');
+}
 
-const routines = computed(() => data.value?.routines ?? []);
+const fetchRoutinesTask = Cadenza.createTask('Fetch System Routines', async (context) => {
+  try {
+    const data: any = await $fetch('/api/system/routines');
+    routines.value = Array.isArray(data?.routines) ? data.routines : [];
+    hasMoreData.value = false;
+  } catch (e) {
+    console.error(e);
+  }
+  return context;
+});
+
+function loadMoreRoutines() {}
+
+onMounted(() => {
+  const appStore = useAppStore();
+  appStore.setCurrentSection('system');
+  Cadenza.run(Cadenza.createRoutine('Init System Routines', [fetchRoutinesTask], ''), {});
+});
 </script>

@@ -28,11 +28,13 @@
     <div class="mac-page-content">
       <slot />
     </div>
+
+    <HelpMorph />
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue';
+import { ref, computed } from 'vue';
 import { useRoute } from 'vue-router';
 import { useAppStore } from '~/stores/app';
 
@@ -76,7 +78,7 @@ const breadcrumbs = computed(() => {
             .replace('-sub', '');
 
     items.push({
-      label: formatBreadcrumbLabel(cleanSegment),
+      label: formatBreadcrumbLabel(cleanSegment, index, pathArray),
       to,
     });
   }

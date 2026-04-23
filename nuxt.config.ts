@@ -1,3 +1,6 @@
+import { fileURLToPath } from 'url';
+const __dirname = fileURLToPath(new URL('.', import.meta.url));
+
 export default defineNuxtConfig({
   compatibilityDate: '2025-05-15',
   devtools: { enabled: true },
@@ -12,11 +15,21 @@ export default defineNuxtConfig({
   css: [
     '@quasar/extras/material-icons/material-icons.css',
     'quasar/src/css/index.sass',
+    '@vue-flow/core/dist/style.css',
+    '@vue-flow/core/dist/theme-default.css',
     '~/assets/css/main.css',
   ],
   ssr: false,
+  vite: {
+    resolve: {
+      alias: {
+        'debug': `${__dirname}debug-shim.js`,
+        typescript: `${__dirname}typescript-shim.js`,
+      },
+    },
+  },
   build: {
-    transpile: ['quasar'],
+    transpile: ['quasar', 'vue3-apexcharts'],
   },
   quasar: {
     plugins: ['Dialog', 'Notify', 'Dark'],
