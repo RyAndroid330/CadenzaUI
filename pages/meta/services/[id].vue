@@ -62,7 +62,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAppStore } from '~/stores/app';
-import Cadenza from '@cadenza.io/core';
+import Cadenza from '@cadenza.io/service';
 
 const route = useRoute();
 const router = useRouter();
@@ -85,7 +85,7 @@ const routineColumns = [
 ];
 
 const flowItems = computed(() => {
-  if (!data.value?.tasks?.length) return [];
+  if (!data.value?.tasks) return [];
   const taskNames = new Set(data.value.tasks.map((t: any) => String(t.name)));
 
   const taskEdges = graphEdges.value.filter(

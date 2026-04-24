@@ -9,7 +9,7 @@ export default defineEventHandler(async (event) => {
   const results = await Promise.allSettled([
     delegateQuery<Record<string, unknown>>(address, port, 'Query directional_task_graph_map', { limit: 1000 }),
     delegateQuery<Record<string, unknown>>(address, port, 'Query task_to_routine_map', { limit: 1000 }),
-    delegateQuery<Record<string, unknown>>(address, port, 'Query service', { filter: { is_meta: false }, sort: { name: 'asc' }, limit: 200 }),
+    delegateQuery<Record<string, unknown>>(address, port, 'Query service', { sort: { name: 'asc' }, limit: 200 }),
     delegateQuery<Record<string, unknown>>(address, port, 'Query task', { filter: { is_meta: false }, sort: { name: 'asc' }, limit: 500 }),
     delegateQuery<Record<string, unknown>>(address, port, 'Query signal_registry', { filter: { is_meta: false }, sort: { name: 'asc' }, limit: 200 }),
     delegateQuery<Record<string, unknown>>(address, port, 'Query task_to_signal_map', { filter: { deleted: false }, limit: 1000 }),
@@ -51,7 +51,7 @@ export default defineEventHandler(async (event) => {
       routineName:  String(r.routineName ?? ''),
       serviceName:  String(r.serviceName ?? ''),
     })),
-    services: serviceRows.map((r) => ({ name: String(r.name ?? '') })),
+    services: serviceRows.filter((r) => !r.isMeta).map((r) => ({ name: String(r.name ?? '') })),
     tasks: taskRows.map((r) => ({
       name:        String(r.name ?? ''),
       service:     String(r.serviceName ?? ''),

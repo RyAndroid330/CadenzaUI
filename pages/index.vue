@@ -45,7 +45,7 @@
 import { ref, onMounted, computed } from 'vue';
 import { useAppStore } from '~/stores/app';
 import CollapsibleSection from '~/components/CollapsibleSection.vue';
-import Cadenza from '@cadenza.io/core';
+import Cadenza from '@cadenza.io/service';
 
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const defaultHeatmapRanges = [{ from: 1, to: 10 }, { from: 11, to: 50 }, { from: 51, to: 100 }, { from: 101, to: 99999 }];

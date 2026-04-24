@@ -14,7 +14,7 @@ export default defineEventHandler(async (event) => {
   });
 
   return {
-    routines: rows.map((row) => ({
+    routines: rows.filter((row) => Boolean(row.isMeta)).map((row) => ({
       uuid: String(row.uuid ?? ''),
       name: String(row.name ?? ''),
       description: String(row.description ?? ''),

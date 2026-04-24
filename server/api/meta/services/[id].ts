@@ -33,12 +33,12 @@ export default defineEventHandler(async (event) => {
     name: String(svc.name ?? ''),
     description: String(svc.description ?? ''),
     isMeta: Boolean(svc.isMeta),
-    tasks: taskRows.map((r) => ({
+    tasks: taskRows.filter((r) => Boolean(r.isMeta)).map((r) => ({
       name: String(r.name ?? ''),
       description: String(r.description ?? ''),
       layerIndex: r.layerIndex != null ? Number(r.layerIndex) : 0,
     })),
-    routines: routineRows.map((r) => ({
+    routines: routineRows.filter((r) => Boolean(r.isMeta)).map((r) => ({
       name: String(r.name ?? ''),
       description: String(r.description ?? ''),
     })),

@@ -23,7 +23,7 @@
 import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAppStore } from '~/stores/app';
-import Cadenza from '@cadenza.io/core';
+import Cadenza from '@cadenza.io/service';
 
 const router = useRouter();
 const traces = ref<any[]>([]);

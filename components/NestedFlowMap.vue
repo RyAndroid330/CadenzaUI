@@ -34,6 +34,33 @@
       />
     </div>
     <div class="zoom-slider" :class="{ 'dark-mode': $q?.dark?.isActive }" aria-hidden="false">
+      <q-btn
+        flat dense round
+        icon="tune"
+        :color="showLayoutSettings ? sectionColor : undefined"
+        @click="showLayoutSettings = !showLayoutSettings"
+        title="Layout Settings"
+      />
+      <template v-if="showLayoutSettings">
+        <span class="zoom-label q-ml-xs">Dir</span>
+        <q-btn-toggle
+          v-model="layoutDirection"
+          dense flat unelevated
+          :toggle-color="sectionColor"
+          :options="directionOptions"
+          class="q-mx-xs"
+        />
+        <q-separator vertical inset class="q-mx-xs" />
+        <span class="zoom-label">Style</span>
+        <q-btn-toggle
+          v-model="layoutAlgorithm"
+          dense flat unelevated
+          :toggle-color="sectionColor"
+          :options="algorithmOptions"
+          class="q-mx-xs"
+        />
+        <q-separator vertical inset class="q-mx-sm" />
+      </template>
       <label class="zoom-label">Zoom</label>
       <input
         type="range"
@@ -172,7 +199,6 @@ const onNodeClick = (...args) => {
       (e) => idsToShow.has(e.source) && idsToShow.has(e.target)
     );
     filtered.value = true;
-    console.log('[NestedFlowMap] Filtered node IDs:', Array.from(idsToShow));
     emit('item-selected', clickedNode);
   }
   else if (clickedNode.nodeType === 'task') {
@@ -275,6 +301,24 @@ const maxZoom = 5;
 const zoom = ref(1);
 const hideServices = ref(true);
 const hideRoutines = ref(true);
+const showLayoutSettings = ref(false);
+const layoutDirection = ref('RIGHT');
+const layoutAlgorithm = ref('layered');
+
+const directionOptions = [
+  { value: 'LEFT',  icon: 'arrow_back' },
+  { value: 'RIGHT', icon: 'arrow_forward' },
+  { value: 'UP',    icon: 'arrow_upward' },
+  { value: 'DOWN',  icon: 'arrow_downward' },
+];
+
+const algorithmOptions = [
+  { value: 'layered',     label: 'Layered' },
+  { value: 'stress',      label: 'Stress' },
+  { value: 'force',       label: 'Force' },
+  { value: 'mrtree',      label: 'Tree' },
+  { value: 'rectpacking', label: 'Pack' },
+];
 
 watch(zoom, async (val) => {
   if (!vueFlowInstance.value) return;
@@ -294,6 +338,10 @@ watch(zoom, async (val) => {
 
 watch(hideServices, () => {
   // Trigger full redraw with or without hierarchical structure
+  updateLayout(props.nodes, props.edges);
+});
+
+watch([layoutDirection, layoutAlgorithm], () => {
   updateLayout(props.nodes, props.edges);
 });
 
@@ -430,29 +478,39 @@ const sectionNodeBg = computed(() => {
 const elk = new ELK();
 
 async function layoutFlatNodes(nodesArr, edgesArr) {
-  // Filter out services and routines, only layout tasks and signals
   const flatNodes = nodesArr.filter(
     (n) => n.nodeType === 'task' || n.nodeType === 'signal'
   );
 
+  const flatOpts = {
+    'elk.algorithm': layoutAlgorithm.value,
+    'elk.spacing.nodeNode': '60',
+  };
+  if (['layered', 'mrtree'].includes(layoutAlgorithm.value)) {
+    flatOpts['elk.direction'] = layoutDirection.value;
+  }
+  if (layoutAlgorithm.value === 'layered') {
+    flatOpts['elk.layered.spacing.edgeNodeBetweenLayers'] = '30';
+    flatOpts['elk.layered.nodePlacement.strategy'] = 'SIMPLE';
+  } else if (layoutAlgorithm.value === 'stress') {
+    flatOpts['elk.stress.desiredEdgeLength'] = '180';
+    flatOpts['elk.stress.iterationLimit'] = '100';
+  } else if (layoutAlgorithm.value === 'force') {
+    flatOpts['elk.force.iterations'] = '100';
+  } else if (layoutAlgorithm.value === 'rectpacking') {
+    flatOpts['elk.rectpacking.aspectRatio'] = '2.5';
+  }
   const elkGraph = {
     id: 'root',
-    layoutOptions: {
-      'elk.algorithm': 'layered',
-      'elk.direction': 'RIGHT',
-      'elk.layered.spacing.edgeNodeBetweenLayers': '30',
-      'elk.spacing.nodeNode': '60',
-      'elk.layered.nodePlacement.strategy': 'SIMPLE',
-    },
+    layoutOptions: flatOpts,
     children: flatNodes.map((node) => ({
       id: node.id,
       width: node.nodeType === 'signal' ? 110 : 70,
       height: node.nodeType === 'signal' ? 50 : 40,
       ...node,
     })),
-    edges: edgesArr
+    edges: (edgesArr || [])
       .filter((edge) => {
-        // Only include edges where both source and target are tasks or signals
         const sourceNode = flatNodes.find((n) => n.id === edge.source);
         const targetNode = flatNodes.find((n) => n.id === edge.target);
         return sourceNode && targetNode;
@@ -547,8 +605,6 @@ async function layoutNodes(nodesArr, edgesArr) {
         }),
     ];
 
-    console.log('[ELK Layout] Service children:', elkChildren);
-
     return {
       id: service.id,
       width: Math.max(600, elkChildren.length * 100),
@@ -563,72 +619,53 @@ async function layoutNodes(nodesArr, edgesArr) {
     };
   });
 
+  // Collect all node IDs present in the ELK hierarchy so we can filter edges
+  const elkHierarchyIds = new Set();
+  elkServices.forEach((svc) => {
+    elkHierarchyIds.add(svc.id);
+    (svc.children || []).forEach((child) => {
+      elkHierarchyIds.add(child.id);
+      (child.children || []).forEach((gc) => elkHierarchyIds.add(gc.id));
+    });
+  });
+  // Global signals (no service parent) placed as top-level ELK nodes
+  const globalSignalNodes = signals
+    .filter((s) => !s.parentNode)
+    .map((s) => ({ id: s.id, width: 110, height: 50, ...s }));
+  globalSignalNodes.forEach((s) => elkHierarchyIds.add(s.id));
+
   const elkEdges = edgesArr
-    .map((edge) => {
-      const sourceNode = nodesArr.find((n) => n.id === edge.source);
-      const targetNode = nodesArr.find((n) => n.id === edge.target);
+    .filter((edge) => elkHierarchyIds.has(edge.source) && elkHierarchyIds.has(edge.target))
+    .map((edge) => ({
+      id: edge.id || `${edge.source}-${edge.target}`,
+      sources: [edge.source],
+      targets: [edge.target],
+    }));
 
-      if (!sourceNode || !targetNode) {
-        console.warn('[ELK Layout] Skipping edge due to missing nodes:', {
-          edge,
-          missingSource: !sourceNode,
-          missingTarget: !targetNode,
-        });
-        return null;
-      }
-
-      const isSignalEdge = Boolean(
-        (sourceNode.nodeType === 'signal') ||
-        (targetNode.nodeType === 'signal') ||
-        (sourceNode.signal) ||
-        (targetNode.signal) ||
-        (edge.data && edge.data.signal)
-      );
-
-      // Determine edge styling
-      let edgeClass = '';
-      let edgeStyle = { strokeWidth: 2 };
-
-      if (isSignalEdge) {
-        // Signal edges: use section color directly
-        edgeStyle.stroke = sectionNodeBg.value;
-      } else {
-        // Non-signal edges: use neutral class
-        edgeClass = 'edge-neutral';
-      }
-
-      return {
-        id: edge.id || `${edge.source}-${edge.target}`,
-        sources: [edge.source],
-        targets: [edge.target],
-        type: edge.type || 'default',
-        class: edgeClass,
-        style: edgeStyle,
-        data: { ...(edge.data || {}), signal: isSignalEdge },
-        animated: true,
-        ...edge,
-      };
-    })
-    .filter(Boolean);
-
+  const hierOpts = {
+    'elk.algorithm': layoutAlgorithm.value,
+    'elk.spacing.nodeNode': '80',
+    'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
+  };
+  if (['layered', 'mrtree'].includes(layoutAlgorithm.value)) {
+    hierOpts['elk.direction'] = layoutDirection.value;
+    hierOpts['elk.layered.spacing.nodeNodeBetweenLayers'] = '80';
+  } else if (layoutAlgorithm.value === 'stress') {
+    hierOpts['elk.stress.desiredEdgeLength'] = '200';
+    hierOpts['elk.stress.iterationLimit'] = '100';
+  } else if (layoutAlgorithm.value === 'force') {
+    hierOpts['elk.force.iterations'] = '100';
+  } else if (layoutAlgorithm.value === 'rectpacking') {
+    hierOpts['elk.rectpacking.aspectRatio'] = '2.5';
+  }
   const elkGraph = {
     id: 'root',
-    layoutOptions: {
-      'elk.algorithm': 'layered',
-      'elk.direction': 'RIGHT',
-      'elk.spacing.nodeNode': '110',
-      'elk.layered.spacing.nodeNodeBetweenLayers': '100',
-      'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
-    },
-    children: [...elkServices],
+    layoutOptions: hierOpts,
+    children: [...elkServices, ...globalSignalNodes],
     edges: elkEdges,
   };
 
-  console.log('[ELK Graph Structure]:', elkGraph);
-
   const layouted = await elk.layout(elkGraph);
-
-  console.log('[ELK Layout Result]:', layouted);
 
   function flattenNodes(elkNode) {
     let flat = [];
@@ -673,7 +710,10 @@ let filterChain = [];
 async function updateLayout(newNodes, newEdges) {
   loading.value = true;
   try {
-    const nodes = await layoutNodes(newNodes, newEdges);
+    let nodes = await layoutNodes(newNodes, newEdges);
+    if (nodes.length === 0 && (newNodes || []).length > 0) {
+      nodes = await layoutFlatNodes(newNodes, newEdges);
+    }
 
     // If hiding services, filter edges to only show connections between displayed nodes
     const displayedNodeIds = new Set(nodes.map((n) => n.id));
@@ -761,8 +801,23 @@ async function updateLayout(newNodes, newEdges) {
     }
   } catch (error) {
     console.error('Error in updateLayout:', error);
-    displayedNodes.value = [];
-    displayedEdges.value = [];
+    try {
+      const flatNodes = await layoutFlatNodes(newNodes, newEdges);
+      const flatNodeIds = new Set(flatNodes.map((n) => n.id));
+      const flatEdges = (newEdges || [])
+        .filter((e) => flatNodeIds.has(e.source) && flatNodeIds.has(e.target))
+        .map((e) => ({ ...e, animated: false }));
+      laidOutNodes.value = flatNodes;
+      laidOutEdges.value = flatEdges;
+      fullNodes = flatNodes;
+      fullEdges = flatEdges;
+      displayedNodes.value = flatNodes;
+      displayedEdges.value = flatEdges;
+    } catch (fallbackError) {
+      console.error('Fallback layout also failed:', fallbackError);
+      displayedNodes.value = [];
+      displayedEdges.value = [];
+    }
   } finally {
     loading.value = false;
   }

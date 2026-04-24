@@ -25,7 +25,7 @@
 import { ref, onMounted } from 'vue';
 import { useAppStore } from '~/stores/app';
 import { useRouter } from 'vue-router';
-import Cadenza from '@cadenza.io/core';
+import Cadenza from '@cadenza.io/service';
 
 const appStore = useAppStore();
 const router = useRouter();

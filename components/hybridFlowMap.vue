@@ -34,6 +34,33 @@
       />
     </div>
     <div class="zoom-slider" :class="{ 'dark-mode': $q.dark.isActive }" aria-hidden="false">
+      <q-btn
+        flat dense round
+        icon="tune"
+        :color="showLayoutSettings ? sectionColor : undefined"
+        @click="showLayoutSettings = !showLayoutSettings"
+        title="Layout Settings"
+      />
+      <template v-if="showLayoutSettings">
+        <span class="zoom-label q-ml-xs">Dir</span>
+        <q-btn-toggle
+          v-model="layoutDirection"
+          dense flat unelevated
+          :toggle-color="sectionColor"
+          :options="directionOptions"
+          class="q-mx-xs"
+        />
+        <q-separator vertical inset class="q-mx-xs" />
+        <span class="zoom-label">Style</span>
+        <q-btn-toggle
+          v-model="layoutAlgorithm"
+          dense flat unelevated
+          :toggle-color="sectionColor"
+          :options="algorithmOptions"
+          class="q-mx-xs"
+        />
+        <q-separator vertical inset class="q-mx-sm" />
+      </template>
       <label class="zoom-label">Zoom</label>
       <input
         type="range"
@@ -411,6 +438,25 @@ const maxZoom = 5;
 const zoom = ref(1);
 const hideServices = ref(true);
 const hideRoutines = ref(true);
+const showLayoutSettings = ref(false);
+const layoutDirection = ref('RIGHT');
+const layoutAlgorithm = ref('layered');
+
+const directionOptions = [
+  { value: 'LEFT',  icon: 'arrow_back' },
+  { value: 'RIGHT', icon: 'arrow_forward' },
+  { value: 'UP',    icon: 'arrow_upward' },
+  { value: 'DOWN',  icon: 'arrow_downward' },
+];
+
+const algorithmOptions = [
+  { value: 'layered',     label: 'Layered' },
+  { value: 'stress',      label: 'Stress' },
+  { value: 'force',       label: 'Force' },
+  { value: 'mrtree',      label: 'Tree' },
+  { value: 'rectpacking', label: 'Pack' },
+];
+
 const trafficView = ref(true); // TEMPORARY: Enable by default for testing
 const showTrafficSettings = ref(false);
 
@@ -467,7 +513,10 @@ watch(zoom, async (val) => {
 });
 
 watch(hideServices, () => {
-  // Trigger full redraw with or without hierarchical structure
+  updateLayout(props.nodes, props.edges);
+});
+
+watch([layoutDirection, layoutAlgorithm], () => {
   updateLayout(props.nodes, props.edges);
 });
 
@@ -670,15 +719,27 @@ async function layoutFlatNodes(nodesArr, edgesArr) {
 
   if (flatNodes.length === 0) return [];
 
+  const flatOpts = {
+    'elk.algorithm': layoutAlgorithm.value,
+    'elk.spacing.nodeNode': '60',
+  };
+  if (['layered', 'mrtree'].includes(layoutAlgorithm.value)) {
+    flatOpts['elk.direction'] = layoutDirection.value;
+  }
+  if (layoutAlgorithm.value === 'layered') {
+    flatOpts['elk.layered.spacing.edgeNodeBetweenLayers'] = '30';
+    flatOpts['elk.layered.nodePlacement.strategy'] = 'SIMPLE';
+  } else if (layoutAlgorithm.value === 'stress') {
+    flatOpts['elk.stress.desiredEdgeLength'] = '180';
+    flatOpts['elk.stress.iterationLimit'] = '100';
+  } else if (layoutAlgorithm.value === 'force') {
+    flatOpts['elk.force.iterations'] = '100';
+  } else if (layoutAlgorithm.value === 'rectpacking') {
+    flatOpts['elk.rectpacking.aspectRatio'] = '2.5';
+  }
   const elkGraph = {
     id: 'root',
-    layoutOptions: {
-      'elk.algorithm': 'layered',
-      'elk.direction': 'RIGHT',
-      'elk.layered.spacing.edgeNodeBetweenLayers': '30',
-      'elk.spacing.nodeNode': '60',
-      'elk.layered.nodePlacement.strategy': 'SIMPLE',
-    },
+    layoutOptions: flatOpts,
     children: flatNodes.map((node) => ({
       id: node.id,
       width: node.nodeType === 'signal' ? 110 : 70,
@@ -872,15 +933,25 @@ async function layoutNodes(nodesArr, edgesArr) {
     })
     .filter(Boolean);
 
+  const hierOpts = {
+    'elk.algorithm': layoutAlgorithm.value,
+    'elk.spacing.nodeNode': '80',
+    'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
+  };
+  if (['layered', 'mrtree'].includes(layoutAlgorithm.value)) {
+    hierOpts['elk.direction'] = layoutDirection.value;
+    hierOpts['elk.layered.spacing.nodeNodeBetweenLayers'] = '80';
+  } else if (layoutAlgorithm.value === 'stress') {
+    hierOpts['elk.stress.desiredEdgeLength'] = '200';
+    hierOpts['elk.stress.iterationLimit'] = '100';
+  } else if (layoutAlgorithm.value === 'force') {
+    hierOpts['elk.force.iterations'] = '100';
+  } else if (layoutAlgorithm.value === 'rectpacking') {
+    hierOpts['elk.rectpacking.aspectRatio'] = '2.5';
+  }
   const elkGraph = {
     id: 'root',
-    layoutOptions: {
-      'elk.algorithm': 'layered',
-      'elk.direction': 'RIGHT',
-      'elk.spacing.nodeNode': '110',
-      'elk.layered.spacing.nodeNodeBetweenLayers': '100',
-      'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
-    },
+    layoutOptions: hierOpts,
     children: [...elkServices],
     edges: elkEdges,
   };

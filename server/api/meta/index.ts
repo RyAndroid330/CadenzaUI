@@ -12,13 +12,12 @@ export default defineEventHandler(async (event) => {
   const limit = Math.min(parseInt((q.limit as string) || '200', 10) || 200, 500);
 
   const rows = await delegateQuery<Record<string, unknown>>(address, port, 'Query service', {
-    filter: { is_meta: true },
     sort: { name: 'asc' },
     limit,
   });
 
   return {
-    services: rows.map((row) => ({
+    services: rows.filter((row) => Boolean(row.isMeta)).map((row) => ({
       uuid: String(row.uuid ?? ''),
       name: String(row.name ?? ''),
       description: String(row.description ?? ''),

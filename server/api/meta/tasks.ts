@@ -14,7 +14,7 @@ export default defineEventHandler(async (event) => {
   });
 
   return {
-    tasks: rows.map((row) => ({
+    tasks: rows.filter((row) => Boolean(row.isMeta)).map((row) => ({
       uuid: String(row.uuid ?? ''),
       name: String(row.name ?? ''),
       description: String(row.description ?? ''),

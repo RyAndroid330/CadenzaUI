@@ -9,13 +9,12 @@ export default defineEventHandler(async (event) => {
   const port = Number(config.cadenzaServerPort ?? 80);
 
   const rows = await delegateQuery<Record<string, unknown>>(address, port, 'Query service', {
-    filter: { is_meta: false },
     sort: { name: 'asc' },
     limit: 500,
   });
 
   return {
-    services: rows.map((row) => ({
+    services: rows.filter((row) => !row.isMeta).map((row) => ({
       uuid: String(row.uuid ?? ''),
       name: String(row.name ?? ''),
       description: String(row.description ?? ''),

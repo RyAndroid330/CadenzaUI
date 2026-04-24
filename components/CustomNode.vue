@@ -23,6 +23,7 @@ interface NodeData {
   sectionNodeBg?: string | (() => string);
   isInChain?: boolean;
   isHovered?: boolean;
+  isExternalService?: boolean;
 }
 
 const props = defineProps<{ data: NodeData }>();
@@ -111,6 +112,7 @@ const nodeSelectedBorder = computed(() =>
       data.hideContainer ? 'hide-container' : '',
       data.isInChain ? 'chain-node' : '',
       data.isHovered ? 'hovered-node' : '',
+      data.isExternalService ? 'external-service-node' : '',
     ]"
     :style="
       data.isSelected
@@ -444,5 +446,11 @@ const nodeSelectedBorder = computed(() =>
   box-shadow: 0px 0px 6px rgba(189, 188, 188, 0.3) !important;
   padding: 10px;
   border-radius: 8px;
+}
+
+.service-node.external-service-node:not(.hide-container) {
+  background: rgba(230, 126, 34, 0.12) !important;
+  border: 2px dashed rgba(230, 126, 34, 0.5) !important;
+  box-shadow: 0px 0px 6px rgba(230, 126, 34, 0.2) !important;
 }
 </style>

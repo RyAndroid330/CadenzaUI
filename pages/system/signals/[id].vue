@@ -29,7 +29,7 @@
               </div>
             </template>
           </InfoCard>
-          <ExecutionStatisticsPieChart style="flex: 1;" />
+          <ExecutionStatisticsPieChart style="flex: 1;" type="signal" :signalName="String(route.params.id)" />
         </div>
       </div>
     </NuxtLayout>
@@ -40,7 +40,7 @@
 import { ref, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAppStore } from '~/stores/app';
-import Cadenza from '@cadenza.io/core';
+import Cadenza from '@cadenza.io/service';
 
 const route = useRoute();
 const router = useRouter();
@@ -73,7 +73,8 @@ const loadAllTask = Cadenza.createTask('Load Signal All', async (context) => {
         for (const t of emittingTasks) {
           items.push({ id: t.name, name: t.name, label: t.name, description: t.description || '', previousTaskExecutionName: null });
         }
-        items.push({ id: signalId, name: id, label: id, description: '', signal: true, previousTaskExecutionName: emittingTasks.map((t) => t.name) });
+        const emitters = emittingTasks.map((t) => t.name);
+        items.push({ id: signalId, name: id, label: id, description: '', signal: true, previousTaskExecutionName: emitters.length === 1 ? emitters[0] : emitters.length > 1 ? emitters : null });
         for (const t of followingTasks) {
           items.push({ id: t.name, name: t.name, label: t.name, description: t.description || '', previousTaskExecutionName: signalId });
         }
