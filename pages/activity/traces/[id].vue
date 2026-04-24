@@ -111,8 +111,8 @@ const showGenerateDialog = ref(false);
 const nodes = computed(() => traceData.value?.nodes ?? []);
 const edges = computed(() => traceData.value?.edges ?? []);
 
-const timelineItems = computed(() =>
-  (traceData.value?.routines ?? []).map((r: any) => ({
+const timelineItems = computed(() => {
+  const routineItems = (traceData.value?.routines ?? []).map((r: any) => ({
     uuid: r.uuid,
     name: r.name,
     label: r.name,
@@ -124,8 +124,24 @@ const timelineItems = computed(() =>
     isRunning: r.isRunning,
     errored: r.errored,
     failed: r.failed ?? false,
-  }))
-);
+    signal: false,
+  }));
+  const signalItems = (traceData.value?.signals ?? []).map((s: any) => ({
+    uuid: s.uuid,
+    name: s.name,
+    label: s.label,
+    started: s.started || s.created,
+    ended: s.ended || s.created,
+    created: s.created,
+    progress: 100,
+    isComplete: true,
+    isRunning: false,
+    errored: false,
+    failed: false,
+    signal: true,
+  }));
+  return [...routineItems, ...signalItems];
+});
 
 const rangedTimelineItems = computed(() =>
   nodes.value

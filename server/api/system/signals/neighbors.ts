@@ -10,21 +10,44 @@ export default defineEventHandler(async (event) => {
   const signalName = String(q.signalName ?? '');
   if (!signalName) throw createError({ statusCode: 400, message: 'Missing signalName' });
 
+  // Find a recent emission of this signal to resolve which task emitted it and what it triggered
   const emissionRows = await delegateQuery<Record<string, unknown>>(address, port, 'Query signal_emission', {
     filter: { signal_name: signalName },
     sort: { created: 'desc' },
-    limit: 50,
+    limit: 1,
   });
 
-  const seenServices = new Set<string>();
-  const previousTasks: { task_name: string; task_description: string }[] = [];
-  for (const row of emissionRows) {
-    const svc = String(row.emitterServiceName ?? '');
-    if (svc && !seenServices.has(svc)) {
-      seenServices.add(svc);
-      previousTasks.push({ task_name: svc, task_description: `emitter service` });
-    }
-  }
+  if (!emissionRows.length) return { emittingTasks: [], followingTasks: [] };
 
-  return { previousTasks, nextTasks: [] };
+  const emission = emissionRows[0];
+  const taskExecutionId = String(emission.taskExecutionId ?? '');
+  const emissionUuid = String(emission.uuid ?? '');
+
+  const [emitterRows, consumerRows] = await Promise.allSettled([
+    taskExecutionId
+      ? delegateQuery<Record<string, unknown>>(address, port, 'Query task_execution', {
+          filter: { uuid: taskExecutionId },
+          limit: 1,
+        })
+      : Promise.resolve([]),
+    delegateQuery<Record<string, unknown>>(address, port, 'Query task_execution', {
+      filter: { signal_emission_id: emissionUuid },
+      sort: { created: 'asc' },
+      limit: 50,
+    }),
+  ]);
+
+  const emitterExecs = emitterRows.status === 'fulfilled' ? emitterRows.value : [];
+  const consumerExecs = consumerRows.status === 'fulfilled' ? consumerRows.value : [];
+
+  const emittingTasks = emitterExecs
+    .map((r) => ({ name: String(r.taskName ?? ''), description: '' }))
+    .filter((t) => t.name);
+
+  const seen = new Set<string>();
+  const followingTasks = consumerExecs
+    .map((r) => ({ name: String(r.taskName ?? ''), description: '' }))
+    .filter((t) => t.name && !seen.has(t.name) && seen.add(t.name));
+
+  return { emittingTasks, followingTasks };
 });

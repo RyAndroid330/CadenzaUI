@@ -70,6 +70,8 @@ const appStore = useAppStore();
 const loading = ref(true);
 const data = ref<any>(null);
 const graphEdges = ref<any[]>([]);
+const taskSignalEdges = ref<any[]>([]);
+const signalToTaskEdges = ref<any[]>([]);
 
 const taskColumns = [
   { name: 'name',        label: 'Name',        field: 'name',        align: 'left' as const, sortable: true },
@@ -84,23 +86,67 @@ const routineColumns = [
 
 const flowItems = computed(() => {
   if (!data.value?.tasks?.length) return [];
-  const taskNames = new Set(data.value.tasks.map((t: any) => t.name));
-  const edges = graphEdges.value.filter((e) => taskNames.has(e.previousTaskName) && taskNames.has(e.taskName));
-  return data.value.tasks.map((task: any) => {
-    const prevNames = edges.filter((e) => e.taskName === task.name).map((e) => e.previousTaskName);
-    return {
+  const taskNames = new Set(data.value.tasks.map((t: any) => String(t.name)));
+
+  const taskEdges = graphEdges.value.filter(
+    (e) => taskNames.has(e.previousTaskName) && taskNames.has(e.taskName)
+  );
+  const emitEdges = taskSignalEdges.value.filter((e) => taskNames.has(e.taskName));
+  const triggerEdges = signalToTaskEdges.value.filter((e) => taskNames.has(e.taskName));
+
+  const involvedSignals = new Map<string, { emit: boolean; trigger: boolean }>();
+  for (const e of emitEdges) {
+    const s = involvedSignals.get(e.signalName) ?? { emit: false, trigger: false };
+    s.emit = true;
+    involvedSignals.set(e.signalName, s);
+  }
+  for (const e of triggerEdges) {
+    const s = involvedSignals.get(e.signalName) ?? { emit: false, trigger: false };
+    s.trigger = true;
+    involvedSignals.set(e.signalName, s);
+  }
+
+  const items: any[] = [];
+
+  for (const task of data.value.tasks) {
+    const prevTasks = taskEdges.filter((e) => e.taskName === task.name).map((e) => e.previousTaskName);
+    const prevSignals = triggerEdges.filter((e) => e.taskName === task.name).map((e) => `signal:${e.signalName}`);
+    const allPrev = [...prevTasks, ...prevSignals];
+    items.push({
       name: task.name,
       label: task.name,
-      description: task.description || '',
-      previousTaskExecutionName: prevNames.length ? prevNames[0] : null,
-    };
-  });
+      description: task.description ?? '',
+      nodeType: 'task',
+      previousTaskExecutionName: allPrev.length === 1 ? allPrev[0] : allPrev.length > 1 ? allPrev : null,
+    });
+  }
+
+  for (const [sigName] of involvedSignals) {
+    const sigId = `signal:${sigName}`;
+    const prevEmitters = emitEdges.filter((e) => e.signalName === sigName).map((e) => e.taskName);
+    const prev = prevEmitters.length ? prevEmitters : null;
+    items.push({
+      name: sigId,
+      label: sigName,
+      description: '',
+      signal: true,
+      nodeType: 'signal',
+      previousTaskExecutionName: Array.isArray(prev) && prev.length === 1 ? prev[0] : prev,
+    });
+  }
+
+  return items;
 });
 
 function onItemSelected(item: any) {
   if (!item) return;
-  const name = item.name || item.id || '';
-  if (name) router.push(`/meta/tasks/${encodeURIComponent(name)}`);
+  if (item.signal || item.nodeType === 'signal') {
+    const name = String(item.name ?? '').replace(/^signal:/, '');
+    if (name) router.push(`/meta/signals/${encodeURIComponent(name)}`);
+  } else {
+    const name = item.name || item.id || '';
+    if (name) router.push(`/meta/tasks/${encodeURIComponent(name)}`);
+  }
 }
 
 const fetchTask = Cadenza.createTask('Fetch Meta Service Definition', async (context) => {
@@ -111,7 +157,10 @@ const fetchTask = Cadenza.createTask('Fetch Meta Service Definition', async (con
   ]);
   if (serviceResult.status === 'fulfilled') data.value = serviceResult.value;
   if (graphResult.status === 'fulfilled') {
-    graphEdges.value = (graphResult.value as any)?.graph ?? [];
+    const g = graphResult.value as any;
+    graphEdges.value = g?.graph ?? [];
+    taskSignalEdges.value = g?.taskSignalEdges ?? [];
+    signalToTaskEdges.value = g?.signalToTaskEdges ?? [];
   }
   return context;
 });

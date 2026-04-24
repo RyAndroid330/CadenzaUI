@@ -119,20 +119,53 @@ function getId() {
   return String(Array.isArray(route.params.id) ? route.params.id[0] : route.params.id);
 }
 
+function enrichChainWithSignals(chain: any[], taskSignalEdges: any[], signalToTaskEdges: any[]) {
+  const taskNames = new Set(chain.map((t) => t.name));
+  const emitEdges = taskSignalEdges.filter((e) => taskNames.has(e.taskName));
+  const triggerEdges = signalToTaskEdges.filter((e) => taskNames.has(e.taskName));
+  const involvedSignals = new Map<string, { emitters: string[] }>();
+  for (const e of emitEdges) {
+    const s = involvedSignals.get(e.signalName) ?? { emitters: [] };
+    if (!s.emitters.includes(e.taskName)) s.emitters.push(e.taskName);
+    involvedSignals.set(e.signalName, s);
+  }
+  for (const e of triggerEdges) {
+    if (!involvedSignals.has(e.signalName)) involvedSignals.set(e.signalName, { emitters: [] });
+  }
+  const enriched = chain.map((task) => {
+    const trigSigs = triggerEdges.filter((e) => e.taskName === task.name).map((e) => `signal:${e.signalName}`);
+    if (trigSigs.length && !task.previousTaskExecutionName) {
+      return { ...task, previousTaskExecutionName: trigSigs.length === 1 ? trigSigs[0] : trigSigs };
+    }
+    return task;
+  });
+  for (const [sigName, { emitters }] of involvedSignals) {
+    const prev = emitters.length === 1 ? emitters[0] : emitters.length > 1 ? emitters : null;
+    enriched.push({ name: `signal:${sigName}`, label: sigName, description: '', signal: true, previousTaskExecutionName: prev });
+  }
+  return enriched;
+}
+
 const fetchAllTask = Cadenza.createTask('Fetch System Task Detail', async (context) => {
   const id = getId();
   heatmapLoading.value = true;
   execPage.value = 1;
-  const [defData, chainData, execData, routineData, heatmapData] = await Promise.allSettled([
+  const [defData, chainData, execData, routineData, heatmapData, graphData] = await Promise.allSettled([
     $fetch<any>(`/api/system/tasks/${encodeURIComponent(id)}`),
     $fetch<any>(`/api/system/tasks/chain?taskName=${encodeURIComponent(id)}`),
     $fetch<any>(`/api/activity/tasks/executions?taskName=${encodeURIComponent(id)}&limit=${PAGE_SIZE}`),
     $fetch<any>(`/api/system/tasks/usedByRoutines?taskName=${encodeURIComponent(id)}`),
     $fetch<any>(`/api/heatmap/tasks?taskName=${encodeURIComponent(id)}`),
+    $fetch<any>('/api/system/graph'),
   ]);
 
   if (defData.status === 'fulfilled') taskData.value = defData.value;
-  if (chainData.status === 'fulfilled') taskChain.value = chainData.value?.chain ?? [];
+  if (chainData.status === 'fulfilled') {
+    const chain = chainData.value?.chain ?? [];
+    const tse = graphData.status === 'fulfilled' ? (graphData.value?.taskSignalEdges ?? []) : [];
+    const ste = graphData.status === 'fulfilled' ? (graphData.value?.signalToTaskEdges ?? []) : [];
+    taskChain.value = enrichChainWithSignals(chain, tse, ste);
+  }
   if (execData.status === 'fulfilled') {
     const list = execData.value?.executions ?? [];
     executions.value = list;
@@ -166,7 +199,12 @@ async function loadMoreExecutions() {
 
 function onTaskSelected(task: any) {
   if (!task) return;
-  if (task.name) router.push(`/system/tasks/${encodeURIComponent(String(task.name))}`);
+  if (task.signal || String(task.name ?? '').startsWith('signal:')) {
+    const name = String(task.name ?? '').replace(/^signal:/, '') || String(task.label ?? '');
+    if (name) router.push(`/system/signals/${encodeURIComponent(name)}`);
+  } else if (task.name) {
+    router.push(`/system/tasks/${encodeURIComponent(String(task.name))}`);
+  }
 }
 
 onMounted(() => {

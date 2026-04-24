@@ -41,41 +41,26 @@ const columns = [
   { name: 'description', label: 'Description', field: 'description', align: 'left' as const },
 ];
 
-const fetchMapTask = Cadenza.createTask('Fetch Meta Server Map', async (context) => {
+const fetchServicesTask = Cadenza.createTask('Fetch Meta Services', async (context) => {
   mapLoading.value = true;
   try {
-    const data: any = await $fetch('/api/meta/servers');
-    const list = data?.instances ?? [];
-    const seen = new Set<string>();
-    const nodes: any[] = [];
-    for (const inst of list) {
-      if (!seen.has(inst.service)) {
-        seen.add(inst.service);
-        nodes.push({
-          id: inst.service,
-          position: { x: 0, y: 0 },
-          sourcePosition: 'right',
-          targetPosition: 'left',
-          data: { label: inst.service, description: inst.isActive ? 'Active' : 'Inactive' },
-          type: 'customNode',
-        });
-      }
-    }
-    mapNodes.value = nodes;
+    const data: any = await $fetch('/api/meta?limit=200');
+    const list: any[] = Array.isArray(data?.services) ? data.services : [];
+    services.value = list;
+    mapNodes.value = list.map((svc) => ({
+      id: svc.name,
+      position: { x: 0, y: 0 },
+      sourcePosition: 'right',
+      targetPosition: 'left',
+      data: { label: svc.name, description: svc.description || '' },
+      type: 'customNode',
+    }));
     mapEdges.value = [];
   } catch (e) {
-    console.error('Error fetching meta server map:', e);
+    console.error('Error fetching meta services:', e);
   } finally {
     mapLoading.value = false;
   }
-  return context;
-});
-
-const fetchServicesTask = Cadenza.createTask('Fetch Meta Services', async (context) => {
-  try {
-    const data: any = await $fetch('/api/meta?limit=200');
-    services.value = Array.isArray(data?.services) ? data.services : [];
-  } catch (e) { console.error(e); }
   return context;
 });
 
@@ -85,6 +70,6 @@ const onNodeSelected = (nodeId: string) => {
 
 onMounted(() => {
   appStore.setCurrentSection('meta');
-  Cadenza.run(Cadenza.createRoutine('Load Meta', [fetchMapTask, fetchServicesTask], ''), {});
+  Cadenza.run(Cadenza.createRoutine('Load Meta', [fetchServicesTask], ''), {});
 });
 </script>

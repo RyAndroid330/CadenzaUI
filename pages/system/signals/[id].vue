@@ -56,55 +56,39 @@ function getId() {
 function onItemSelected(item: any) {
   if (!item || item.signal) return;
   const name = item.name || item.id || '';
-  if (name) router.push(`/system/services/${encodeURIComponent(name)}`);
+  if (name) router.push(`/system/tasks/${encodeURIComponent(name)}`);
 }
 
-const fetchSignalTask = Cadenza.createTask('Fetch Signal Definition', async (context) => {
-  const id = getId();
+
+const loadAllTask = Cadenza.createTask('Load Signal All', async (context) => {
   try {
-    data.value = await $fetch(`/api/system/signals/${encodeURIComponent(id)}`);
-  } catch (e) { console.error(e); }
-  return context;
-});
-
-const fetchNeighborsTask = Cadenza.createTask('Fetch Signal Neighbors', async (context) => {
-  const id = getId();
-  try {
-    const result: any = await $fetch(`/api/system/signals/neighbors?signalName=${encodeURIComponent(id)}`);
-    const previousTasks = result?.previousTasks ?? [];
-    const items: any[] = [];
-    const sid = `signal-${id}`;
-
-    for (const pt of previousTasks) {
-      items.push({
-        id: `svc-${pt.task_name}`,
-        name: pt.task_name,
-        label: pt.task_name,
-        description: pt.task_description,
-        previousTaskExecutionName: null,
-      });
-    }
-    items.push({
-      id: sid,
-      name: id,
-      label: id,
-      description: data.value?.domain || '',
-      signal: true,
-      previousTaskExecutionName: previousTasks.length ? `svc-${previousTasks[0].task_name}` : null,
-    });
-
-    flowItems.value = items;
-  } catch (e) { console.error(e); }
-  return context;
-});
-
-onMounted(async () => {
-  appStore.setCurrentSection('system');
-  loading.value = true;
-  try {
-    await Cadenza.run(Cadenza.createRoutine('Load Signal Definition', [fetchSignalTask, fetchNeighborsTask], ''), {});
+    await Promise.allSettled([
+      $fetch(`/api/system/signals/${encodeURIComponent(getId())}`).then((d) => { data.value = d; }).catch(console.error),
+      $fetch(`/api/system/signals/neighbors?signalName=${encodeURIComponent(getId())}`).then((result: any) => {
+        const emittingTasks: any[] = result?.emittingTasks ?? [];
+        const followingTasks: any[] = result?.followingTasks ?? [];
+        const id = getId();
+        const signalId = `signal:${id}`;
+        const items: any[] = [];
+        for (const t of emittingTasks) {
+          items.push({ id: t.name, name: t.name, label: t.name, description: t.description || '', previousTaskExecutionName: null });
+        }
+        items.push({ id: signalId, name: id, label: id, description: '', signal: true, previousTaskExecutionName: emittingTasks.map((t) => t.name) });
+        for (const t of followingTasks) {
+          items.push({ id: t.name, name: t.name, label: t.name, description: t.description || '', previousTaskExecutionName: signalId });
+        }
+        flowItems.value = items;
+      }).catch(console.error),
+    ]);
   } finally {
     loading.value = false;
   }
+  return context;
+});
+
+onMounted(() => {
+  appStore.setCurrentSection('system');
+  loading.value = true;
+  Cadenza.run(Cadenza.createRoutine('Load Signal Definition', [loadAllTask], ''), {});
 });
 </script>

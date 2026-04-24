@@ -8,7 +8,11 @@
         </q-btn>
       </template>
 
-      <div>
+      <q-inner-loading :showing="loading">
+        <q-spinner-gears size="80px" color="primary" />
+      </q-inner-loading>
+
+      <div v-if="!loading">
         <div class="q-pa-md">
           <q-tabs v-model="selectedTab" dense active-color="primary" indicator-color="primary" align="justify" narrow-indicator>
             <q-tab name="routineMap" label="Map" />
@@ -18,12 +22,9 @@
           <q-separator />
 
           <div v-show="selectedTab === 'routineMap'">
-            <div v-if="mapLoading" class="flex justify-center items-center" style="min-height: 400px;">
-              <q-spinner-dots size="48px" color="primary" />
-            </div>
             <FlowMap
-              v-else-if="routineMap.length > 0"
-              :items="routineMap"
+              v-if="flowItems.length > 0"
+              :items="flowItems"
               id-field="uuid"
               label-field="label"
               previous-field="previousTaskExecutionId"
@@ -37,11 +38,11 @@
           </div>
 
           <div v-show="selectedTab === 'timeline'">
-            <ApexTimeline :itemMap="routineMap" :loading="mapLoading" />
+            <Timeline :itemMap="timelineItems" />
           </div>
 
           <div v-show="selectedTab === 'rangedTimeline'">
-            <ApexTimeline :itemMap="routineMap" :loading="mapLoading" />
+            <ApexTimeline :itemMap="rangedItems" />
           </div>
         </div>
 
@@ -52,7 +53,7 @@
               <div class="row" style="flex-wrap: wrap;">
                 <div class="col" style="min-width: 300px;">
                   <div class="q-mx-md q-my-sm">UUID: {{ routineData.uuid }}</div>
-                  <div class="q-mx-md q-my-sm">Executed tasks: {{ routineMap.length }}</div>
+                  <div class="q-mx-md q-my-sm">Executed tasks: {{ routineData.tasks?.length ?? 0 }}</div>
                   <div class="q-mx-md q-my-sm">Started: {{ routineData.started ? formatDate(routineData.started) : 'N/A' }}</div>
                   <div class="q-mx-md q-my-sm">Ended: {{ routineData.ended ? formatDate(routineData.ended) : 'N/A' }}</div>
                   <div class="q-mx-md q-my-sm">Duration: {{ routineData.duration || 'N/A' }} sec</div>
@@ -123,7 +124,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAppStore } from '~/stores/app';
 import Cadenza from '@cadenza.io/core';
@@ -131,12 +132,10 @@ import Cadenza from '@cadenza.io/core';
 const route = useRoute();
 const router = useRouter();
 const appStore = useAppStore();
-
+const loading = ref(true);
 const routineData = ref<any>(null);
-const routineMap = ref<any[]>([]);
 const selectedTask = ref<any>(null);
 const selectedTab = ref('routineMap');
-const mapLoading = ref(false);
 const showGenerateDialog = ref(false);
 
 function getId() {
@@ -146,39 +145,63 @@ function getId() {
 function formatDate(d: string | null) {
   if (!d) return 'N/A';
   const dt = new Date(d);
-  return `${dt.toDateString()} ${dt.toLocaleTimeString()}`;
+  return isNaN(dt.getTime()) ? 'N/A' : `${dt.toDateString()} ${dt.toLocaleTimeString()}`;
 }
 
-const fetchRoutineTask = Cadenza.createTask('Fetch Activity Routine Detail', async (context) => {
+const tasks = computed<any[]>(() => routineData.value?.tasks ?? []);
+const signals = computed<any[]>(() => routineData.value?.signals ?? []);
+
+// FlowMap: tasks + signal nodes with edges
+const flowItems = computed(() => {
+  const items: any[] = [...tasks.value];
+  for (const s of signals.value) {
+    const triggeredPrev = s.previousTaskExecutionId ? [s.previousTaskExecutionId] : [];
+    items.push({ ...s, previousTaskExecutionId: triggeredPrev.length === 1 ? triggeredPrev[0] : triggeredPrev.length > 1 ? triggeredPrev : null });
+    // wire triggered tasks back from signal
+    for (const tid of (s.triggeredTaskIds ?? [])) {
+      const task = items.find((i) => i.uuid === tid);
+      if (task && !task.previousTaskExecutionId) task.previousTaskExecutionId = s.uuid;
+    }
+  }
+  return items;
+});
+
+// Timeline: tasks + signals sorted by started
+const timelineItems = computed(() => {
+  const taskItems = tasks.value.map((t: any) => ({ ...t, signal: false }));
+  const sigItems = signals.value.map((s: any) => ({ ...s, signal: true }));
+  return [...taskItems, ...sigItems];
+});
+
+// Ranged timeline: same list, ApexTimeline handles signal vs task rendering
+const rangedItems = computed(() => timelineItems.value);
+
+function onItemSelected(item: any) {
+  if (!item) return;
+  if (item.signal || item.type === 'signal') {
+    const name = item.name || item.label || '';
+    if (name) router.push(`/activity/signals/${encodeURIComponent(item.uuid)}`);
+  } else {
+    selectedTask.value = tasks.value.find((t: any) => t.uuid === (item.uuid || item.id)) ?? null;
+  }
+}
+
+const fetchAllTask = Cadenza.createTask('Fetch Activity Routine Detail', async (context) => {
   const id = getId();
-  mapLoading.value = true;
   try {
     routineData.value = await $fetch(`/api/activity/routines/${id}`);
   } catch (e) { console.error(e); }
   return context;
 });
 
-const fetchMapTask = Cadenza.createTask('Fetch Activity Routine Map', async (context) => {
-  try {
-    if (!routineData.value?.uuid) return context;
-    const data: any = await $fetch(`/api/activity/routines/tasks?routineExecutionId=${routineData.value.uuid}`);
-    routineMap.value = Array.isArray(data) ? data : [];
-  } catch (e) {
-    routineMap.value = [];
-  } finally {
-    mapLoading.value = false;
-  }
-  return context;
-});
-
-function onItemSelected(item: any) {
-  if (!item) return;
-  selectedTask.value = routineMap.value.find((t) => t.uuid === (item.uuid || item.id)) ?? null;
-}
-
 onMounted(async () => {
   appStore.setCurrentSection('serviceActivity');
-  await Cadenza.run(Cadenza.createRoutine('Load Activity Routine', [fetchRoutineTask, fetchMapTask], ''), {});
+  loading.value = true;
+  try {
+    await Cadenza.run(Cadenza.createRoutine('Load Activity Routine', [fetchAllTask], ''), {});
+  } finally {
+    loading.value = false;
+  }
 });
 </script>
 

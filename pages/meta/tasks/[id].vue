@@ -1,85 +1,77 @@
 <template>
   <NuxtLayout name="dashboard-layout">
     <NuxtLayout name="dashboard-main-layout">
-      <template #title>{{ data?.name || String(route.params.id) }}</template>
+      <template #title>
+        {{ data?.name || String(route.params.id) }}
+        {{ data?.version ? ` (v${data.version})` : '' }}
+      </template>
 
-      <q-inner-loading :showing="loading">
-        <q-spinner-gears size="80px" color="primary" />
-      </q-inner-loading>
-
-      <div v-if="!loading">
-        <div v-if="taskMap.length > 0">
-          <FlowMap
-            :items="taskMap"
-            id-field="name"
-            label-field="label"
-            previous-field="previousTaskExecutionName"
-            @item-selected="onItemSelected"
-          />
-        </div>
-
-        <div class="q-mx-md">
-          <InfoCard v-if="data" class="full-width q-mb-md">
-            <template #title>{{ data.name }}</template>
-            <template #info>
-              <div class="row" style="flex-wrap: wrap;">
-                <div class="col" style="min-width: 280px;">
-                  <div class="q-mx-md q-my-sm">Description: {{ data.description || 'N/A' }}</div>
-                  <div class="q-mx-md q-my-sm">Version: {{ data.version || 'N/A' }}</div>
-                  <div class="q-mx-md q-my-sm">Layer Index: {{ data.layerIndex }}</div>
-                  <div class="q-mx-md q-my-sm">Unique: {{ data.isUnique ? 'Yes' : 'No' }}</div>
-                  <div class="q-mx-md q-my-sm">Concurrency: {{ data.concurrency }}</div>
-                </div>
-                <div class="col" style="min-width: 280px;">
-                  <div
-                    v-if="data.service"
-                    class="q-mx-md q-my-sm cursor-pointer text-accent"
-                    @click="router.push(`/meta/services/${data.service}`)"
-                  >Service: {{ data.service }}</div>
-                </div>
-              </div>
-            </template>
-          </InfoCard>
-
-          <div class="row" style="gap: 24px; flex-wrap: wrap;">
-            <ExecutionStatisticsPieChart style="flex: 1; min-width: 280px;" type="task" :taskName="String(route.params.id)" />
-          </div>
-
-          <Table
-            class="q-mt-md"
-            :columns="execColumns"
-            :rows="executions"
-            row-key="uuid"
-            inspect-base-path="/activity/tasks"
-            :has-more-data="false"
-          >
-            <template #title>Active Executions</template>
-          </Table>
-
-          <Table
-            class="q-mt-md"
-            :columns="routineColumns"
-            :rows="routinesUsingTask"
-            row-key="name"
-            inspect-base-path="/meta/routines"
-            :has-more-data="false"
-          >
-            <template #title>Routines Using This Task</template>
-          </Table>
-        </div>
-
-        <HeatMap
-          v-if="heatmapRawData.length > 0"
-          :loading="false"
-          :hasData="true"
-          :chartSeries="[]"
-          :yearOptions="heatmapYearOptions"
-          :monthNames="MONTH_NAMES"
-          :editableRanges="heatmapRanges"
-          :rawHeatmapData="heatmapRawData"
-          @update:editableRanges="(v) => heatmapRanges = v"
+      <div class="row q-mx-md">
+        <FlowMap
+          v-if="taskChain.length > 0"
+          :items="taskChain"
+          id-field="name"
+          label-field="label"
+          previous-field="previousTaskExecutionName"
+          @item-selected="onTaskSelected"
         />
+        <InfoCard v-if="data">
+          <template #title>{{ data.name }}</template>
+          <template #info>
+            <div class="flex-column full-width">
+              <div class="q-mx-md q-my-sm">Description: {{ data.description || 'N/A' }}</div>
+              <div class="q-separator" style="height: 2px"></div>
+              <div
+                class="q-mx-md q-my-sm cursor-pointer text-primary"
+                @click="router.push(`/meta/services/${data.service}`)"
+              >Service: <span>{{ data.service }}</span></div>
+              <div class="q-mx-md q-my-sm">Version: {{ data.version || 'N/A' }}</div>
+              <div class="q-mx-md q-my-sm">Layer Index: {{ data.layerIndex }}</div>
+              <div class="q-mx-md q-my-sm">Is Unique: {{ data.isUnique ? 'Yes' : 'No' }}</div>
+              <div class="q-mx-md q-my-sm">Concurrency: {{ data.concurrency }}</div>
+            </div>
+          </template>
+        </InfoCard>
+        <InfoCard v-if="data?.functionString">
+          <template #title>Task Function</template>
+          <template #info>
+            <pre style="max-height: 200px; overflow: auto; font-size: 12px; white-space: pre-wrap;">{{ data.functionString }}</pre>
+          </template>
+        </InfoCard>
+        <ExecutionStatisticsPieChart type="task" :taskName="String(route.params.id)" />
+        <Table
+          :columns="execColumns"
+          :rows="executions"
+          row-key="uuid"
+          inspect-base-path="/activity/tasks"
+          :has-more-data="hasMoreExecs"
+          :loadingMoreData="loadingMoreExecs"
+          @loadMoreData="loadMoreExecutions"
+          :enableInfiniteScroll="true"
+        >
+          <template #title>Active Executions</template>
+        </Table>
+        <Table
+          :columns="routineColumns"
+          :rows="routines"
+          row-key="name"
+          inspect-base-path="/meta/routines"
+          :has-more-data="false"
+        >
+          <template #title>Routines Using This Task</template>
+        </Table>
       </div>
+      <HeatMap
+        v-if="heatmapRawData.length > 0"
+        :loading="heatmapLoading"
+        :hasData="heatmapRawData.length > 0"
+        :chartSeries="[]"
+        :yearOptions="heatmapYearOptions"
+        :monthNames="MONTH_NAMES"
+        :editableRanges="heatmapRanges"
+        :rawHeatmapData="heatmapRawData"
+        @update:editableRanges="(v) => heatmapRanges = v"
+      />
     </NuxtLayout>
   </NuxtLayout>
 </template>
@@ -95,20 +87,27 @@ const MONTH_NAMES = ['January','February','March','April','May','June','July','A
 const route = useRoute();
 const router = useRouter();
 const appStore = useAppStore();
-const loading = ref(true);
+
 const data = ref<any>(null);
-const taskMap = ref<any[]>([]);
+const taskChain = ref<any[]>([]);
 const executions = ref<any[]>([]);
-const routinesUsingTask = ref<any[]>([]);
+const routines = ref<any[]>([]);
 const heatmapRawData = ref<any[]>([]);
 const heatmapYearOptions = ref<number[]>([new Date().getFullYear()]);
 const heatmapRanges = ref([{ from: 1, to: 10 }, { from: 11, to: 50 }, { from: 51, to: 100 }, { from: 101, to: 99999 }]);
+const heatmapLoading = ref(false);
+const hasMoreExecs = ref(false);
+const loadingMoreExecs = ref(false);
+const execPage = ref(1);
+const PAGE_SIZE = 50;
 
 const execColumns = [
-  { name: 'name',     label: 'Name',     field: 'name',     align: 'left' as const, sortable: true },
-  { name: 'status',   label: 'Status',   field: 'status',   align: 'left' as const },
-  { name: 'progress', label: 'Progress', field: 'progress', align: 'left' as const },
-  { name: 'started',  label: 'Started',  field: 'started',  align: 'left' as const, sortable: true },
+  { name: 'uuid',       label: 'ID',       field: 'uuid',       align: 'left' as const },
+  { name: 'isRunning',  label: 'Running',  field: 'isRunning',  align: 'left' as const, sortable: true },
+  { name: 'isComplete', label: 'Complete', field: 'isComplete', align: 'left' as const, sortable: true },
+  { name: 'errored',    label: 'Errored',  field: 'errored',    align: 'left' as const, sortable: true },
+  { name: 'progress',   label: 'Progress', field: 'progress',   align: 'left' as const },
+  { name: 'started',    label: 'Started',  field: 'started',    align: 'left' as const, sortable: true },
 ];
 
 const routineColumns = [
@@ -120,53 +119,96 @@ function getId() {
   return String(Array.isArray(route.params.id) ? route.params.id[0] : route.params.id);
 }
 
-function onItemSelected(item: any) {
-  if (!item) return;
-  const name = item.name || item.id || '';
-  if (name) router.push(`/meta/tasks/${encodeURIComponent(name)}`);
+function enrichChainWithSignals(chain: any[], taskSignalEdges: any[], signalToTaskEdges: any[]) {
+  const taskNames = new Set(chain.map((t) => t.name));
+  const emitEdges = taskSignalEdges.filter((e) => taskNames.has(e.taskName));
+  const triggerEdges = signalToTaskEdges.filter((e) => taskNames.has(e.taskName));
+  const involvedSignals = new Map<string, { emitters: string[] }>();
+  for (const e of emitEdges) {
+    const s = involvedSignals.get(e.signalName) ?? { emitters: [] };
+    if (!s.emitters.includes(e.taskName)) s.emitters.push(e.taskName);
+    involvedSignals.set(e.signalName, s);
+  }
+  for (const e of triggerEdges) {
+    if (!involvedSignals.has(e.signalName)) involvedSignals.set(e.signalName, { emitters: [] });
+  }
+  const enriched = chain.map((task) => {
+    const trigSigs = triggerEdges.filter((e) => e.taskName === task.name).map((e) => `signal:${e.signalName}`);
+    if (trigSigs.length && !task.previousTaskExecutionName) {
+      return { ...task, previousTaskExecutionName: trigSigs.length === 1 ? trigSigs[0] : trigSigs };
+    }
+    return task;
+  });
+  for (const [sigName, { emitters }] of involvedSignals) {
+    const prev = emitters.length === 1 ? emitters[0] : emitters.length > 1 ? emitters : null;
+    enriched.push({ name: `signal:${sigName}`, label: sigName, description: '', signal: true, previousTaskExecutionName: prev });
+  }
+  return enriched;
 }
 
-const fetchDataTask = Cadenza.createTask('Fetch Meta Task Data', async (context) => {
+const fetchAllTask = Cadenza.createTask('Fetch Meta Task Detail', async (context) => {
   const id = getId();
-  const [taskResult, chainResult, execResult, routinesResult, heatmapResult] = await Promise.allSettled([
-    $fetch(`/api/meta/tasks/${encodeURIComponent(id)}`),
-    $fetch(`/api/meta/tasks/chain?taskName=${encodeURIComponent(id)}`),
-    $fetch(`/api/activity/tasks/executions?taskName=${encodeURIComponent(id)}&limit=50`),
-    $fetch(`/api/meta/tasks/usedByRoutines?taskName=${encodeURIComponent(id)}`),
-    $fetch(`/api/heatmap/tasks?taskName=${encodeURIComponent(id)}`),
+  heatmapLoading.value = true;
+  execPage.value = 1;
+  const [defData, chainData, execData, routineData, heatmapData, graphData] = await Promise.allSettled([
+    $fetch<any>(`/api/meta/tasks/${encodeURIComponent(id)}`),
+    $fetch<any>(`/api/meta/tasks/chain?taskName=${encodeURIComponent(id)}`),
+    $fetch<any>(`/api/activity/tasks/executions?taskName=${encodeURIComponent(id)}&limit=${PAGE_SIZE}`),
+    $fetch<any>(`/api/meta/tasks/usedByRoutines?taskName=${encodeURIComponent(id)}`),
+    $fetch<any>(`/api/heatmap/tasks?taskName=${encodeURIComponent(id)}`),
+    $fetch<any>('/api/meta/graph'),
   ]);
 
-  if (taskResult.status === 'fulfilled') data.value = taskResult.value;
-  if (chainResult.status === 'fulfilled') {
-    const c: any = chainResult.value;
-    taskMap.value = (c?.chain ?? []).map((t: any) => ({ ...t, id: t.name }));
+  if (defData.status === 'fulfilled') data.value = defData.value;
+  if (chainData.status === 'fulfilled') {
+    const chain = chainData.value?.chain ?? [];
+    const tse = graphData.status === 'fulfilled' ? (graphData.value?.taskSignalEdges ?? []) : [];
+    const ste = graphData.status === 'fulfilled' ? (graphData.value?.signalToTaskEdges ?? []) : [];
+    taskChain.value = enrichChainWithSignals(chain, tse, ste);
   }
-  if (execResult.status === 'fulfilled') {
-    const e: any = execResult.value;
-    executions.value = e?.executions ?? e?.tasks ?? [];
+  if (execData.status === 'fulfilled') {
+    const list = execData.value?.executions ?? [];
+    executions.value = list;
+    hasMoreExecs.value = list.length === PAGE_SIZE;
   }
-  if (routinesResult.status === 'fulfilled') {
-    const r: any = routinesResult.value;
-    routinesUsingTask.value = r?.routines ?? [];
-  }
-  if (heatmapResult.status === 'fulfilled') {
-    const h: any = heatmapResult.value;
-    const raw = h?.data ?? [];
+  if (routineData.status === 'fulfilled') routines.value = routineData.value?.routines ?? [];
+  if (heatmapData.status === 'fulfilled') {
+    const raw = heatmapData.value?.data ?? [];
     heatmapRawData.value = raw;
     const years = new Set<number>();
     for (const r of raw) { const y = new Date(r.date).getFullYear(); if (!isNaN(y)) years.add(y); }
     heatmapYearOptions.value = years.size ? [...years].sort((a, b) => b - a) : [new Date().getFullYear()];
   }
+  heatmapLoading.value = false;
   return context;
 });
 
-onMounted(async () => {
-  appStore.setCurrentSection('meta');
-  loading.value = true;
+async function loadMoreExecutions() {
+  loadingMoreExecs.value = true;
+  execPage.value++;
+  const id = getId();
   try {
-    await Cadenza.run(Cadenza.createRoutine('Load Meta Task Detail', [fetchDataTask], ''), {});
+    const d: any = await $fetch(`/api/activity/tasks/executions?taskName=${encodeURIComponent(id)}&limit=${PAGE_SIZE}`);
+    const list = d?.executions ?? [];
+    executions.value = [...executions.value, ...list];
+    hasMoreExecs.value = list.length === PAGE_SIZE;
   } finally {
-    loading.value = false;
+    loadingMoreExecs.value = false;
   }
+}
+
+function onTaskSelected(task: any) {
+  if (!task) return;
+  if (task.signal || String(task.name ?? '').startsWith('signal:')) {
+    const name = String(task.name ?? '').replace(/^signal:/, '') || String(task.label ?? '');
+    if (name) router.push(`/meta/signals/${encodeURIComponent(name)}`);
+  } else if (task.name) {
+    router.push(`/meta/tasks/${encodeURIComponent(String(task.name))}`);
+  }
+}
+
+onMounted(() => {
+  appStore.setCurrentSection('meta');
+  Cadenza.run(Cadenza.createRoutine('Load Meta Task', [fetchAllTask], ''), {});
 });
 </script>

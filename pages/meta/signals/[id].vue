@@ -11,7 +11,7 @@
         <FlowMap
           v-if="flowItems.length > 0"
           :items="flowItems"
-          id-field="id"
+          id-field="name"
           label-field="label"
           previous-field="previousTaskExecutionName"
           @item-selected="onItemSelected"
@@ -53,47 +53,46 @@ function getId() {
 }
 
 function onItemSelected(item: any) {
-  if (!item || item.signal) return;
+  if (!item) return;
+  if (item.signal) return;
   const name = item.name || item.id || '';
-  if (name) router.push(`/meta/services/${encodeURIComponent(name)}`);
+  if (name) router.push(`/meta/tasks/${encodeURIComponent(name)}`);
 }
 
-const fetchSignalTask = Cadenza.createTask('Fetch Meta Signal Definition', async (context) => {
+const fetchAllTask = Cadenza.createTask('Fetch Meta Signal Definition', async (context) => {
   const id = getId();
-  try {
-    data.value = await $fetch(`/api/meta/signals/${encodeURIComponent(id)}`);
-  } catch (e) { console.error(e); }
-  return context;
-});
+  const sigId = `signal:${id}`;
+  const [defResult, graphResult] = await Promise.allSettled([
+    $fetch<any>(`/api/meta/signals/${encodeURIComponent(id)}`),
+    $fetch<any>('/api/meta/graph'),
+  ]);
 
-const fetchNeighborsTask = Cadenza.createTask('Fetch Meta Signal Neighbors', async (context) => {
-  const id = getId();
-  try {
-    const result: any = await $fetch(`/api/system/signals/neighbors?signalName=${encodeURIComponent(id)}`);
-    const previousTasks = result?.previousTasks ?? [];
+  if (defResult.status === 'fulfilled') data.value = defResult.value;
+
+  if (graphResult.status === 'fulfilled') {
+    const g = graphResult.value as any;
+    const taskSignalEdges: any[] = g?.taskSignalEdges ?? [];
+    const signalToTaskEdges: any[] = g?.signalToTaskEdges ?? [];
+
+    const emitters = taskSignalEdges.filter((e) => e.signalName === id).map((e) => e.taskName);
+    const triggered = signalToTaskEdges.filter((e) => e.signalName === id).map((e) => e.taskName);
+
     const items: any[] = [];
-    const sid = `signal-${id}`;
-
-    for (const pt of previousTasks) {
-      items.push({
-        id: `svc-${pt.task_name}`,
-        name: pt.task_name,
-        label: pt.task_name,
-        description: pt.task_description,
-        previousTaskExecutionName: null,
-      });
+    for (const t of emitters) {
+      items.push({ name: t, label: t, description: '', previousTaskExecutionName: null });
     }
     items.push({
-      id: sid,
-      name: id,
+      name: sigId,
       label: id,
       description: data.value?.domain || '',
       signal: true,
-      previousTaskExecutionName: previousTasks.length ? `svc-${previousTasks[0].task_name}` : null,
+      previousTaskExecutionName: emitters.length === 1 ? emitters[0] : emitters.length > 1 ? emitters : null,
     });
-
+    for (const t of triggered) {
+      items.push({ name: t, label: t, description: '', previousTaskExecutionName: sigId });
+    }
     flowItems.value = items;
-  } catch (e) { console.error(e); }
+  }
   return context;
 });
 
@@ -101,7 +100,7 @@ onMounted(async () => {
   appStore.setCurrentSection('meta');
   loading.value = true;
   try {
-    await Cadenza.run(Cadenza.createRoutine('Load Meta Signal', [fetchSignalTask, fetchNeighborsTask], ''), {});
+    await Cadenza.run(Cadenza.createRoutine('Load Meta Signal', [fetchAllTask], ''), {});
   } finally {
     loading.value = false;
   }

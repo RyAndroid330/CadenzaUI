@@ -607,7 +607,7 @@ const onDataPointSelection = (
   max-width: 85dvw;
   min-height: 400px;
   max-height: 800px;
-  overflow-y: 100%;
+  overflow-y: auto;
   padding: 60px 20px 20px 20px;
   position: relative;
 }

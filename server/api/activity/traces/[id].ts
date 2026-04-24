@@ -9,7 +9,7 @@ export default defineEventHandler(async (event) => {
   const address = String(config.cadenzaServerAddress ?? 'http://cadenza-db.localhost');
   const port = Number(config.cadenzaServerPort ?? 80);
 
-  const [traceRows, routineRows] = await Promise.all([
+  const [traceResult, routineResult, signalResult] = await Promise.allSettled([
     delegateQuery<Record<string, unknown>>(address, port, 'Query execution_trace', {
       filter: { uuid: id },
       limit: 1,
@@ -19,25 +19,43 @@ export default defineEventHandler(async (event) => {
       sort: { created: 'asc' },
       limit: 200,
     }),
+    delegateQuery<Record<string, unknown>>(address, port, 'Query signal_emission', {
+      filter: { execution_trace_id: id },
+      sort: { created: 'asc' },
+      limit: 500,
+    }),
   ]);
+
+  const traceRows = traceResult.status === 'fulfilled' ? traceResult.value : [];
+  const routineRows = routineResult.status === 'fulfilled' ? routineResult.value : [];
+  const signalRows = signalResult.status === 'fulfilled' ? signalResult.value : [];
 
   if (!traceRows.length) throw createError({ statusCode: 404, message: 'Not found' });
   const trace = traceRows[0];
   const serviceName = String(trace.serviceName ?? '');
   const traceUuid = String(trace.uuid ?? '');
 
-  // Fetch all task_executions for all routines in parallel
-  const taskResults = await Promise.allSettled(
-    routineRows.map((r) =>
-      delegateQuery<Record<string, unknown>>(address, port, 'Query task_execution', {
-        filter: { routine_execution_id: String(r.uuid ?? '') },
-        sort: { created: 'asc' },
-        limit: 200,
-      })
-    )
-  );
+  // Fetch task_executions for all routines + triggered tasks for each signal in parallel
+  const [taskResults, triggeredResults] = await Promise.all([
+    Promise.allSettled(
+      routineRows.map((r) =>
+        delegateQuery<Record<string, unknown>>(address, port, 'Query task_execution', {
+          filter: { routine_execution_id: String(r.uuid ?? '') },
+          sort: { created: 'asc' },
+          limit: 200,
+        })
+      )
+    ),
+    Promise.allSettled(
+      signalRows.map((s) =>
+        delegateQuery<Record<string, unknown>>(address, port, 'Query task_execution', {
+          filter: { signal_emission_id: String(s.uuid ?? '') },
+          limit: 50,
+        })
+      )
+    ),
+  ]);
 
-  // Build NestedFlowMap nodes and edges
   const nodes: any[] = [];
   const edges: any[] = [];
 
@@ -53,7 +71,6 @@ export default defineEventHandler(async (event) => {
     const routineId = String(row.uuid ?? '');
     const routineName = String(row.name ?? '');
 
-    // Routine node
     nodes.push({
       id: routineId,
       type: 'custom',
@@ -62,12 +79,10 @@ export default defineEventHandler(async (event) => {
       data: { label: routineName || routineId, description: '', isParent: true },
     });
 
-    // Task nodes for this routine
     const taskRows = taskResults[idx]?.status === 'fulfilled' ? taskResults[idx].value : [];
     for (const t of taskRows) {
       const taskId = String(t.uuid ?? '');
       if (!taskId) continue;
-
       nodes.push({
         id: taskId,
         type: 'custom',
@@ -88,7 +103,6 @@ export default defineEventHandler(async (event) => {
         },
       });
 
-      // Edges from previous_task_execution_ids
       let prevIds: string[] = [];
       const raw = t.previousTaskExecutionIds;
       if (Array.isArray(raw)) {
@@ -116,11 +130,59 @@ export default defineEventHandler(async (event) => {
     };
   });
 
+  // Signal nodes and edges
+  const signals = signalRows.map((s, idx) => {
+    const sigId = String(s.uuid ?? '');
+    const sigName = String(s.signalName ?? '');
+    const routineId = String(s.routineExecutionId ?? '');
+    const emittingTaskId = String(s.taskExecutionId ?? '');
+    const created = String(s.created ?? '');
+
+    nodes.push({
+      id: sigId,
+      type: 'custom',
+      nodeType: 'signal',
+      parentNode: routineId || traceUuid,
+      data: {
+        label: sigName,
+        uuid: sigId,
+        signal: true,
+        created,
+        started: created,
+        ended: created,
+        type: 'signal',
+      },
+    });
+
+    if (emittingTaskId) {
+      edges.push({ id: `e${emittingTaskId}-${sigId}`, source: emittingTaskId, target: sigId, style: { strokeDasharray: '4 2' } });
+    }
+
+    const triggered = triggeredResults[idx]?.status === 'fulfilled' ? triggeredResults[idx].value : [];
+    for (const t of triggered) {
+      const triggeredId = String(t.uuid ?? '');
+      if (triggeredId) {
+        edges.push({ id: `e${sigId}-${triggeredId}`, source: sigId, target: triggeredId, style: { strokeDasharray: '4 2' } });
+      }
+    }
+
+    return {
+      uuid: sigId,
+      name: sigName,
+      label: sigName,
+      created,
+      started: created,
+      ended: created,
+      signal: true,
+    };
+  });
+
   return {
     uuid: traceUuid,
     service: serviceName,
     created: String(trace.created ?? ''),
     routines,
+    signals,
     nodes,
     edges,
   };

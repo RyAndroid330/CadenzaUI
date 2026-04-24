@@ -3,70 +3,54 @@
     <NuxtLayout name="dashboard-main-layout">
       <template #title>{{ data?.name || String(route.params.id) }}</template>
 
-      <q-inner-loading :showing="loading">
-        <q-spinner-gears size="80px" color="primary" />
-      </q-inner-loading>
-
-      <div v-if="!loading">
-        <div v-if="taskMap.length > 0">
-          <FlowMap
-            :items="taskMap"
-            id-field="name"
-            label-field="label"
-            previous-field="previousTaskExecutionName"
-            @item-selected="onItemSelected"
-          />
-        </div>
-
-        <div class="q-mx-md">
-          <InfoCard v-if="data" class="full-width q-mb-md">
-            <template #title>{{ data.name }}</template>
-            <template #info>
-              <div class="row" style="flex-wrap: wrap;">
-                <div class="col" style="min-width: 280px;">
-                  <div class="q-mx-md q-my-sm">Description: {{ data.description || 'N/A' }}</div>
-                  <div class="q-mx-md q-my-sm">Version: {{ data.version || 'N/A' }}</div>
-                  <div class="q-mx-md q-my-sm">Meta: {{ data.isMeta ? 'Yes' : 'No' }}</div>
-                </div>
-                <div class="col" style="min-width: 280px;">
-                  <div
-                    v-if="data.service"
-                    class="q-mx-md q-my-sm cursor-pointer text-accent"
-                    @click="router.push(`/meta/services/${data.service}`)"
-                  >Service: {{ data.service }}</div>
-                </div>
-              </div>
-            </template>
-          </InfoCard>
-
-          <div class="row" style="gap: 24px; flex-wrap: wrap;">
-            <ExecutionStatisticsPieChart style="flex: 1; min-width: 280px;" type="routine" :routineName="String(route.params.id)" />
-          </div>
-
-          <Table
-            class="q-mt-md"
-            :columns="execColumns"
-            :rows="executions"
-            row-key="uuid"
-            inspect-base-path="/activity/routines"
-            :has-more-data="false"
-          >
-            <template #title>Active Executions</template>
-          </Table>
-        </div>
-
-        <HeatMap
-          v-if="heatmapRawData.length > 0"
-          :loading="false"
-          :hasData="true"
-          :chartSeries="[]"
-          :yearOptions="heatmapYearOptions"
-          :monthNames="MONTH_NAMES"
-          :editableRanges="heatmapRanges"
-          :rawHeatmapData="heatmapRawData"
-          @update:editableRanges="(v) => heatmapRanges = v"
+      <div class="row q-mx-md">
+        <FlowMap
+          v-if="taskChain.length > 0"
+          :items="taskChain"
+          id-field="name"
+          label-field="label"
+          previous-field="previousTaskExecutionName"
+          @item-selected="onTaskSelected"
         />
+        <InfoCard v-if="data">
+          <template #title>{{ data.name }}</template>
+          <template #info>
+            <div class="flex-column full-width">
+              <div class="q-mx-md q-my-sm">Description: {{ data.description || 'N/A' }}</div>
+              <div class="q-separator" style="height: 2px"></div>
+              <div
+                class="q-mx-md q-my-sm cursor-pointer text-primary"
+                @click="router.push(`/meta/services/${data.service}`)"
+              >Service: <span>{{ data.service }}</span></div>
+              <div class="q-mx-md q-my-sm">Version: {{ data.version || 'N/A' }}</div>
+            </div>
+          </template>
+        </InfoCard>
+        <ExecutionStatisticsPieChart type="routine" :routineName="String(route.params.id)" />
+        <Table
+          :columns="execColumns"
+          :rows="executions"
+          row-key="uuid"
+          inspect-base-path="/activity/routines"
+          :has-more-data="hasMoreExecs"
+          :loadingMoreData="loadingMoreExecs"
+          @loadMoreData="loadMoreExecutions"
+          :enableInfiniteScroll="true"
+        >
+          <template #title>Active Executions</template>
+        </Table>
       </div>
+      <HeatMap
+        v-if="heatmapRawData.length > 0"
+        :loading="heatmapLoading"
+        :hasData="heatmapRawData.length > 0"
+        :chartSeries="[]"
+        :yearOptions="heatmapYearOptions"
+        :monthNames="MONTH_NAMES"
+        :editableRanges="heatmapRanges"
+        :rawHeatmapData="heatmapRawData"
+        @update:editableRanges="(v) => heatmapRanges = v"
+      />
     </NuxtLayout>
   </NuxtLayout>
 </template>
@@ -82,19 +66,25 @@ const MONTH_NAMES = ['January','February','March','April','May','June','July','A
 const route = useRoute();
 const router = useRouter();
 const appStore = useAppStore();
-const loading = ref(true);
+
 const data = ref<any>(null);
-const taskMap = ref<any[]>([]);
+const taskChain = ref<any[]>([]);
 const executions = ref<any[]>([]);
 const heatmapRawData = ref<any[]>([]);
 const heatmapYearOptions = ref<number[]>([new Date().getFullYear()]);
 const heatmapRanges = ref([{ from: 1, to: 10 }, { from: 11, to: 50 }, { from: 51, to: 100 }, { from: 101, to: 99999 }]);
+const heatmapLoading = ref(false);
+const hasMoreExecs = ref(false);
+const loadingMoreExecs = ref(false);
+const PAGE_SIZE = 50;
 
 const execColumns = [
-  { name: 'name',       label: 'Routine',  field: 'name',       align: 'left' as const, sortable: true },
-  { name: 'isRunning',  label: 'Running',  field: 'isRunning',  align: 'left' as const },
-  { name: 'isComplete', label: 'Complete', field: 'isComplete', align: 'left' as const },
-  { name: 'errored',    label: 'Errored',  field: 'errored',    align: 'left' as const },
+  { name: 'uuid',       label: 'ID',       field: 'uuid',       align: 'left' as const },
+  { name: 'service',    label: 'Service',  field: 'service',    align: 'left' as const, sortable: true },
+  { name: 'isRunning',  label: 'Running',  field: 'isRunning',  align: 'left' as const, sortable: true },
+  { name: 'isComplete', label: 'Complete', field: 'isComplete', align: 'left' as const, sortable: true },
+  { name: 'errored',    label: 'Errored',  field: 'errored',    align: 'left' as const, sortable: true },
+  { name: 'progress',   label: 'Progress', field: 'progress',   align: 'left' as const },
   { name: 'created',    label: 'Created',  field: 'created',    align: 'left' as const, sortable: true },
 ];
 
@@ -102,48 +92,92 @@ function getId() {
   return String(Array.isArray(route.params.id) ? route.params.id[0] : route.params.id);
 }
 
-function onItemSelected(item: any) {
-  if (!item) return;
-  const name = item.name || item.id || '';
-  if (name) router.push(`/meta/tasks/${encodeURIComponent(name)}`);
+function enrichChainWithSignals(chain: any[], taskSignalEdges: any[], signalToTaskEdges: any[]) {
+  const taskNames = new Set(chain.map((t) => t.name));
+  const emitEdges = taskSignalEdges.filter((e) => taskNames.has(e.taskName));
+  const triggerEdges = signalToTaskEdges.filter((e) => taskNames.has(e.taskName));
+  const involvedSignals = new Map<string, { emitters: string[] }>();
+  for (const e of emitEdges) {
+    const s = involvedSignals.get(e.signalName) ?? { emitters: [] };
+    if (!s.emitters.includes(e.taskName)) s.emitters.push(e.taskName);
+    involvedSignals.set(e.signalName, s);
+  }
+  for (const e of triggerEdges) {
+    if (!involvedSignals.has(e.signalName)) involvedSignals.set(e.signalName, { emitters: [] });
+  }
+  const enriched = chain.map((task) => {
+    const trigSigs = triggerEdges.filter((e) => e.taskName === task.name).map((e) => `signal:${e.signalName}`);
+    if (trigSigs.length && !task.previousTaskExecutionName) {
+      return { ...task, previousTaskExecutionName: trigSigs.length === 1 ? trigSigs[0] : trigSigs };
+    }
+    return task;
+  });
+  for (const [sigName, { emitters }] of involvedSignals) {
+    const prev = emitters.length === 1 ? emitters[0] : emitters.length > 1 ? emitters : null;
+    enriched.push({ name: `signal:${sigName}`, label: sigName, description: '', signal: true, previousTaskExecutionName: prev });
+  }
+  return enriched;
 }
 
-const fetchDataTask = Cadenza.createTask('Fetch Meta Routine Data', async (context) => {
+const fetchAllTask = Cadenza.createTask('Fetch Meta Routine Detail', async (context) => {
   const id = getId();
-  const [routineResult, chainResult, execResult, heatmapResult] = await Promise.allSettled([
-    $fetch(`/api/meta/routines/${encodeURIComponent(id)}`),
-    $fetch(`/api/meta/routines/taskchain?routineName=${encodeURIComponent(id)}`),
-    $fetch(`/api/activity/routines/executions?routineName=${encodeURIComponent(id)}&limit=50`),
-    $fetch(`/api/heatmap/routines?routineName=${encodeURIComponent(id)}`),
+  heatmapLoading.value = true;
+  const [defData, chainData, execData, heatmapData, graphData] = await Promise.allSettled([
+    $fetch<any>(`/api/meta/routines/${encodeURIComponent(id)}`),
+    $fetch<any>(`/api/meta/routines/taskchain?routineName=${encodeURIComponent(id)}`),
+    $fetch<any>(`/api/activity/routines/executions?routineName=${encodeURIComponent(id)}&limit=${PAGE_SIZE}`),
+    $fetch<any>(`/api/heatmap/routines?routineName=${encodeURIComponent(id)}`),
+    $fetch<any>('/api/meta/graph'),
   ]);
 
-  if (routineResult.status === 'fulfilled') data.value = routineResult.value;
-  if (chainResult.status === 'fulfilled') {
-    const c: any = chainResult.value;
-    taskMap.value = (c?.chain ?? []).map((t: any) => ({ ...t, id: t.name }));
+  if (defData.status === 'fulfilled') data.value = defData.value;
+  if (chainData.status === 'fulfilled') {
+    const chain = chainData.value?.chain ?? [];
+    const tse = graphData.status === 'fulfilled' ? (graphData.value?.taskSignalEdges ?? []) : [];
+    const ste = graphData.status === 'fulfilled' ? (graphData.value?.signalToTaskEdges ?? []) : [];
+    taskChain.value = enrichChainWithSignals(chain, tse, ste);
   }
-  if (execResult.status === 'fulfilled') {
-    const e: any = execResult.value;
-    executions.value = e?.executions ?? e?.routines ?? [];
+  if (execData.status === 'fulfilled') {
+    const list = execData.value?.executions ?? [];
+    executions.value = list;
+    hasMoreExecs.value = list.length === PAGE_SIZE;
   }
-  if (heatmapResult.status === 'fulfilled') {
-    const h: any = heatmapResult.value;
-    const raw = h?.data ?? [];
+  if (heatmapData.status === 'fulfilled') {
+    const raw = heatmapData.value?.data ?? [];
     heatmapRawData.value = raw;
     const years = new Set<number>();
     for (const r of raw) { const y = new Date(r.date).getFullYear(); if (!isNaN(y)) years.add(y); }
     heatmapYearOptions.value = years.size ? [...years].sort((a, b) => b - a) : [new Date().getFullYear()];
   }
+  heatmapLoading.value = false;
   return context;
 });
 
-onMounted(async () => {
-  appStore.setCurrentSection('meta');
-  loading.value = true;
+async function loadMoreExecutions() {
+  loadingMoreExecs.value = true;
+  const id = getId();
   try {
-    await Cadenza.run(Cadenza.createRoutine('Load Meta Routine Detail', [fetchDataTask], ''), {});
+    const d: any = await $fetch(`/api/activity/routines/executions?routineName=${encodeURIComponent(id)}&limit=${PAGE_SIZE}`);
+    const list = d?.executions ?? [];
+    executions.value = [...executions.value, ...list];
+    hasMoreExecs.value = list.length === PAGE_SIZE;
   } finally {
-    loading.value = false;
+    loadingMoreExecs.value = false;
   }
+}
+
+function onTaskSelected(task: any) {
+  if (!task) return;
+  if (task.signal || String(task.name ?? '').startsWith('signal:')) {
+    const name = String(task.name ?? '').replace(/^signal:/, '') || String(task.label ?? '');
+    if (name) router.push(`/meta/signals/${encodeURIComponent(name)}`);
+  } else if (task.name) {
+    router.push(`/meta/tasks/${encodeURIComponent(String(task.name))}`);
+  }
+}
+
+onMounted(() => {
+  appStore.setCurrentSection('meta');
+  Cadenza.run(Cadenza.createRoutine('Load Meta Routine', [fetchAllTask], ''), {});
 });
 </script>

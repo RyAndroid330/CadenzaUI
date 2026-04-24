@@ -10,7 +10,7 @@ export default defineEventHandler(async (event) => {
   const routineName = String(q.routineName ?? '');
   if (!routineName) throw createError({ statusCode: 400, message: 'Missing routineName' });
 
-  const [mapRows, graphRows] = await Promise.all([
+  const [mapResult, graphResult] = await Promise.allSettled([
     delegateQuery<Record<string, unknown>>(address, port, 'Query task_to_routine_map', {
       filter: { routine_name: routineName },
       limit: 200,
@@ -19,6 +19,9 @@ export default defineEventHandler(async (event) => {
       limit: 2000,
     }),
   ]);
+
+  const mapRows = mapResult.status === 'fulfilled' ? mapResult.value : [];
+  const graphRows = graphResult.status === 'fulfilled' ? graphResult.value : [];
 
   const taskNames = new Set(mapRows.map((r) => String(r.taskName ?? '')));
 

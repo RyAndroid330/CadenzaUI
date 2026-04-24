@@ -10,7 +10,7 @@ export default defineEventHandler(async (event) => {
   const taskName = String(q.taskName ?? '');
   if (!taskName) throw createError({ statusCode: 400, message: 'Missing taskName' });
 
-  const [graphRows, taskRows] = await Promise.all([
+  const [graphResult, taskResult] = await Promise.allSettled([
     delegateQuery<Record<string, unknown>>(address, port, 'Query directional_task_graph_map', {
       limit: 2000,
     }),
@@ -19,6 +19,9 @@ export default defineEventHandler(async (event) => {
       limit: 500,
     }),
   ]);
+
+  const graphRows = graphResult.status === 'fulfilled' ? graphResult.value : [];
+  const taskRows = taskResult.status === 'fulfilled' ? taskResult.value : [];
 
   const edges = graphRows.map((g) => ({
     prev: String(g.predecessorTaskName ?? ''),

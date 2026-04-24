@@ -8,17 +8,24 @@
       :side="(entry.layer_index ?? 0) % 2 === 0 ? 'left' : 'right'"
       :style="{
         backgroundColor:
-          entry.timelineType === 'heading'
+          entry.signal
+            ? 'rgba(128, 128, 128, 0.18)'
+            : entry.timelineType === 'heading'
             ? 'rgba(0, 123, 255, 0.10)'
             : (entry.layer_index ?? 0) % 2 === 0
             ? 'rgba(128, 128, 128, 0.1)'
             : '',
-        borderLeft: entry.timelineType === 'heading' ? '4px solid #007bff' : '',
+        borderLeft: entry.signal
+          ? '4px solid #888'
+          : entry.timelineType === 'heading'
+          ? '4px solid #007bff'
+          : '',
         fontWeight: entry.timelineType === 'heading' ? 'bold' : 'normal',
       }"
       @click="onEntrySelected(entry)"
     >
-      <q-badge v-if="entry.type" color="blue-8" class="q-mb-sm">
+      <q-badge v-if="entry.signal" color="grey-7" class="q-mb-sm">Signal</q-badge>
+      <q-badge v-else-if="entry.type" color="blue-8" class="q-mb-sm">
         {{ String(entry.type).charAt(0).toUpperCase() + String(entry.type).slice(1) }}
       </q-badge>
       <q-badge v-else-if="entry.timelineType === 'heading'" color="blue-8" class="q-mb-sm">
