@@ -164,8 +164,13 @@ const fetchMapTask = Cadenza.createTask('Fetch Activity Task Map', async (contex
 
 function onItemSelected(item: any) {
   if (!item) return;
-  const execId = item.uuid || item.id;
-  if (execId) router.push(`/activity/tasks/${execId}`);
+  if (item.signal || item.nodeType === 'signal' || item.type === 'signal') {
+    const execId = item.uuid || item.id;
+    if (execId) router.push(`/activity/signals/${execId}`);
+  } else {
+    const execId = item.uuid || item.id;
+    if (execId) router.push(`/activity/tasks/${execId}`);
+  }
 }
 
 onMounted(async () => {

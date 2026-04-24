@@ -23,15 +23,41 @@ export default defineEventHandler(async (event) => {
     return [buildNode(targetRows[0])];
   }
 
-  // Fetch all tasks in the same routine
-  const allRows = await delegateQuery<Record<string, unknown>>(address, port, 'Query task_execution', {
-    filter: { routine_execution_id: routineExecutionId },
-    sort: { created: 'asc' },
-    limit: 200,
-  });
+  // Fetch all tasks and signal emissions in the same routine
+  const [allRows, signalRows] = await Promise.all([
+    delegateQuery<Record<string, unknown>>(address, port, 'Query task_execution', {
+      filter: { routine_execution_id: routineExecutionId },
+      sort: { created: 'asc' },
+      limit: 200,
+    }),
+    delegateQuery<Record<string, unknown>>(address, port, 'Query signal_emission', {
+      filter: { routine_execution_id: routineExecutionId },
+      sort: { created: 'asc' },
+      limit: 200,
+    }),
+  ]);
 
-  return allRows.map(buildNode);
+  const taskNodes = allRows.map(buildNode);
+  const signalNodes = signalRows.map(buildSignalNode);
+  return [...taskNodes, ...signalNodes];
 });
+
+function buildSignalNode(row: Record<string, unknown>) {
+  const taskExecId = String(row.taskExecutionId ?? '');
+  return {
+    uuid: String(row.uuid ?? ''),
+    id: String(row.uuid ?? ''),
+    type: 'signal',
+    signal: true,
+    nodeType: 'signal',
+    name: String(row.signalName ?? ''),
+    label: String(row.signalName ?? ''),
+    description: '',
+    created: row.created ? String(row.created) : null,
+    previousTaskExecutionId: taskExecId || null,
+    previousTaskExecutionName: taskExecId || null,
+  };
+}
 
 function buildNode(row: Record<string, unknown>) {
   // previous_task_execution_ids comes from DB — delegation may return as array or postgres-formatted string

@@ -181,7 +181,11 @@ function onItemSelected(item: any) {
   if (item.signal || item.type === 'signal') {
     const name = item.name || item.label || '';
     if (name) router.push(`/activity/signals/${encodeURIComponent(item.uuid)}`);
-  } else {
+  }
+  if (item.task || item.type === 'task') {
+    const name = item.name || item.label || '';
+    if (name) router.push(`/activity/tasks/${encodeURIComponent(item.uuid)}`);
+  }  else {
     selectedTask.value = tasks.value.find((t: any) => t.uuid === (item.uuid || item.id)) ?? null;
   }
 }

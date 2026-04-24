@@ -228,6 +228,7 @@ const activityItems = [
 
 const metaItems = [
   { label: 'Overview', path: '/meta',          icon: 'dashboard' },
+  { label: 'Services', path: '/meta/services', icon: 'cloud' },
   { label: 'Routines', path: '/meta/routines', icon: 'repeat' },
   { label: 'Tasks',    path: '/meta/tasks',    icon: 'task_alt' },
   { label: 'Signals',  path: '/meta/signals',  icon: 'cell_tower' },
