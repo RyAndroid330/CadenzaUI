@@ -13,15 +13,16 @@ export default defineEventHandler(async (event) => {
   let table: string;
   const filter: Record<string, unknown> = {};
 
-  if (type === 'task') {
-    table = 'Query task_execution';
-    if (name) filter.task_name = name;
+  if (type === 'routine') {
+    table = 'Query routine_execution';
+    if (name) filter.name = name;
   } else if (type === 'signal') {
     table = 'Query signal_emission';
     if (name) filter.signal_name = name;
   } else {
-    table = 'Query routine_execution';
-    if (name) filter.name = name;
+    // default (home page + type=task): all task executions
+    table = 'Query task_execution';
+    if (name) filter.task_name = name;
   }
 
   const rows = await delegateQuery<Record<string, unknown>>(address, port, table, {

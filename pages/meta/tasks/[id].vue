@@ -39,6 +39,7 @@
           </template>
         </InfoCard>
         <ExecutionStatisticsPieChart type="task" :taskName="String(route.params.id)" />
+        <ExecutionTimeChart type="task" :taskName="String(route.params.id)" />
         <Table
           :columns="execColumns"
           :rows="executions"

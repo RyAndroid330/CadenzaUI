@@ -27,6 +27,7 @@
           </template>
         </InfoCard>
         <ExecutionStatisticsPieChart type="routine" :routineName="String(route.params.id)" />
+        <ExecutionTimeChart type="routine" :routineName="String(route.params.id)" />
         <Table
           :columns="execColumns"
           :rows="executions"

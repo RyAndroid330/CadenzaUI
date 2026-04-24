@@ -30,6 +30,7 @@
         </div>
       </div>
       <div class="row q-mx-md">
+        <ExecutionTimeChart type="service" :serviceName="String(route.params.id)" />
         <Table
           :columns="instanceColumns"
           :rows="instances"

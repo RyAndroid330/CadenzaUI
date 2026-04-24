@@ -1,4 +1,4 @@
-const DEFAULT_TIMEOUT_MS = 8_000;
+const DEFAULT_TIMEOUT_MS = 20_000;
 
 function buildDelegationUrl(address: string, port: number): string {
   if (address.includes('://')) {
@@ -12,6 +12,7 @@ export async function delegateQuery<T = Record<string, unknown>>(
   port: number,
   taskName: string,
   queryData: Record<string, unknown> = {},
+  timeoutMs = DEFAULT_TIMEOUT_MS,
 ): Promise<T[]> {
   const url = buildDelegationUrl(address, port);
 
@@ -19,7 +20,7 @@ export async function delegateQuery<T = Record<string, unknown>>(
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ queryData, __remoteRoutineName: taskName }),
-    signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
   });
 
   if (!response.ok) {
