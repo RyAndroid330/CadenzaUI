@@ -181,23 +181,49 @@ function onLogScroll(details: { to: number; ref: any }) {
   }
 }
 
+async function fetchPage(page: number): Promise<any[]> {
+  let qs: string;
+  if (props.allServices) {
+    qs = `?page=${page}&limit=${logLimit}`;
+  } else {
+    qs = `?serviceInstanceId=${encodeURIComponent(props.serviceInstanceId!)}&page=${page}&limit=${logLimit}`;
+  }
+  const endpoint = props.allServices ? '/api/activity/servers/allLogs' : '/api/activity/servers/instanceLog';
+  const res: any = await $fetch(`${endpoint}${qs}`);
+  return res?.logs || [];
+}
+
+async function autoFill() {
+  const MIN_VISIBLE = 20;
+  const MAX_PAGES = 20;
+  while (logHasMore.value && !logLoadingMore.value && filteredLogRows.value.length < MIN_VISIBLE && logPage.value < MAX_PAGES) {
+    logLoadingMore.value = true;
+    try {
+      const nextPage = logPage.value + 1;
+      const newLogs = await fetchPage(nextPage);
+      if (newLogs.length < logLimit) logHasMore.value = false;
+      if (newLogs.length > 0) {
+        logRows.value = [...logRows.value, ...newLogs];
+        logPage.value = nextPage;
+      } else {
+        break;
+      }
+    } catch (e) {
+      console.error('Failed to auto-fill logs:', e);
+      break;
+    } finally {
+      logLoadingMore.value = false;
+    }
+  }
+}
+
 async function loadMoreLogs() {
   if ((!props.serviceInstanceId && !props.allServices) || logLoadingMore.value || !logHasMore.value) return;
   logLoadingMore.value = true;
   try {
     const nextPage = logPage.value + 1;
-    let qs: string;
-    if (props.allServices) {
-      qs = `?page=${nextPage}&limit=${logLimit}`;
-    } else {
-      qs = `?serviceInstanceId=${encodeURIComponent(props.serviceInstanceId!)}&page=${nextPage}&limit=${logLimit}`;
-    }
-    const endpoint = props.allServices ? '/api/activity/servers/allLogs' : '/api/activity/servers/instanceLog';
-    const res: any = await $fetch(`${endpoint}${qs}`);
-    const newLogs = res?.logs || [];
-    if (newLogs.length < logLimit) {
-      logHasMore.value = false;
-    }
+    const newLogs = await fetchPage(nextPage);
+    if (newLogs.length < logLimit) logHasMore.value = false;
     if (newLogs.length > 0) {
       logRows.value = [...logRows.value, ...newLogs];
       logPage.value = nextPage;
@@ -206,6 +232,7 @@ async function loadMoreLogs() {
     console.error('Failed to load more logs:', e);
   } finally {
     logLoadingMore.value = false;
+    await autoFill();
   }
 }
 
@@ -216,35 +243,15 @@ async function fetchLogs(serviceInstanceId: string | null) {
   logHasMore.value = true;
   logRows.value = [];
   try {
-    // Determine which levels are selected
-    const activeLevels = Object.entries(logLevelFilters.value)
-      .filter(([level, checked]) => checked)
-      .map(([level]) => level);
-    let qs: string;
-    if (props.allServices) {
-      qs = `?page=1&limit=${logLimit}`;
-      if (activeLevels.length > 0 && activeLevels.length < 4) {
-        qs += `&level=${encodeURIComponent(activeLevels.join(','))}`;
-      }
-    } else {
-      qs = `?serviceInstanceId=${encodeURIComponent(serviceInstanceId!)}&page=1&limit=${logLimit}`;
-      // If only one level is selected, use server-side filtering
-      if (activeLevels.length === 1) {
-        qs += `&level=${encodeURIComponent(activeLevels[0])}`;
-      }
-    }
-    const endpoint = props.allServices ? '/api/activity/servers/allLogs' : '/api/activity/servers/instanceLog';
-    const res: any = await $fetch(`${endpoint}${qs}`);
-    const logs = res?.logs || [];
+    const logs = await fetchPage(1);
     logRows.value = logs;
-    if (logs.length < logLimit) {
-      logHasMore.value = false;
-    }
+    if (logs.length < logLimit) logHasMore.value = false;
   } catch (e) {
     console.error('Failed to fetch logs:', e);
     logRows.value = [];
   } finally {
     logLoading.value = false;
+    await autoFill();
   }
 }
 
