@@ -134,9 +134,11 @@ const props = withDefaults(defineProps<{
   serviceInstanceId?: string | null;
   allServices?: boolean;
   initialFilters?: { critical?: boolean; error?: boolean; warning?: boolean; info?: boolean };
+  refreshKey?: number;
 }>(), {
   serviceInstanceId: null,
   allServices: false,
+  refreshKey: 0,
 });
 
 const $q = useQuasar();
@@ -255,11 +257,11 @@ async function fetchLogs(serviceInstanceId: string | null) {
   }
 }
 
-// Refetch logs when serviceInstanceId or logLevelFilters change
-watch([  
+watch([
   () => props.serviceInstanceId,
   () => props.allServices,
-  () => ({ ...logLevelFilters.value })
+  () => ({ ...logLevelFilters.value }),
+  () => props.refreshKey,
 ], ([id]) => {
   fetchLogs(id as string | null);
 }, { immediate: true });

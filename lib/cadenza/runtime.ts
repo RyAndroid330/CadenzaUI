@@ -34,12 +34,25 @@ export interface LiveEvent {
 // ---------------------------------------------------------------------------
 
 export type CadenzaUIProjectionState = {
+  activityVersion: number;
+  lastSignalName: string | null;
   liveFeed: LiveEvent[];
 };
 
 // ---------------------------------------------------------------------------
-// Known signals emitted by the monitored Cadenza services
-// Update these to match the actual signal names in cadenza-db-service
+// IoT pipeline signals — increment activityVersion when they arrive
+// ---------------------------------------------------------------------------
+
+export const IOT_SIGNALS = [
+  'global.iot.telemetry.ingested',
+  'global.iot.anomaly.detected',
+  'global.iot.prediction.ready',
+  'global.iot.prediction.maintenance_needed',
+  'global.iot.alert.raised',
+] as const;
+
+// ---------------------------------------------------------------------------
+// Cadenza system signals — populate liveFeed when they arrive
 // ---------------------------------------------------------------------------
 
 export const CADENZA_SIGNALS = {
@@ -92,32 +105,45 @@ function payloadToLiveEvent(
   }
 }
 
-// Keep only the 50 most recent events, deduplicated by id
 function appendLiveEvent(feed: LiveEvent[], event: LiveEvent): LiveEvent[] {
   const deduped = feed.filter((e) => e.id !== event.id);
   return [event, ...deduped].slice(0, 50);
 }
 
 // ---------------------------------------------------------------------------
-// Signal bindings — one binding per signal
+// Signal bindings — one per signal, updating the appropriate state slice
 // ---------------------------------------------------------------------------
 
-function createSignalBinding(signal: CadenzaSignalName) {
-  return {
-    signal,
+export function createCadenzaUISignalBindings() {
+  const iotBindings = IOT_SIGNALS.map((signalName) => ({
+    signal: signalName,
+    reduce: (
+      current: CadenzaUIProjectionState,
+      _payload: Record<string, any>,
+    ): CadenzaUIProjectionState => ({
+      ...current,
+      activityVersion: current.activityVersion + 1,
+      lastSignalName: signalName,
+    }),
+  }));
+
+  const cadenzaBindings = Object.values(CADENZA_SIGNALS).map((signalName) => ({
+    signal: signalName,
     reduce: (
       current: CadenzaUIProjectionState,
       payload: Record<string, any>,
     ): CadenzaUIProjectionState => {
-      const event = payloadToLiveEvent(signal, payload);
-      if (!event) return current;
-      return { ...current, liveFeed: appendLiveEvent(current.liveFeed, event) };
+      const event = payloadToLiveEvent(signalName as CadenzaSignalName, payload);
+      return {
+        ...current,
+        activityVersion: current.activityVersion + 1,
+        lastSignalName: signalName,
+        liveFeed: event ? appendLiveEvent(current.liveFeed, event) : current.liveFeed,
+      };
     },
-  };
-}
+  }));
 
-export function createCadenzaUISignalBindings() {
-  return Object.values(CADENZA_SIGNALS).map(createSignalBinding);
+  return [...iotBindings, ...cadenzaBindings];
 }
 
 // ---------------------------------------------------------------------------

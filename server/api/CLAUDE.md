@@ -1,8 +1,16 @@
+import { useRuntimeConfig } from '#imports';
 # Server API — Claude Code Guide
 
-## Pattern
+## When to Use Each Pattern
 
-All routes use `delegateQuery` from `~/server/utils/cadenza/bridge`:
+| Table source | Pattern | Why |
+|---|---|---|
+| `iot-db-service` tables (IoT business data) | `createSSRInquiryBridge` + `bridge.inquire()` | iot-db-service registers its postgres actor intents — inquiry routing works |
+| `cadenza-db-service` tables (Cadenza metadata) | `delegateQuery` → `/delegation` | cadenza-db-service does NOT register postgres actor intents externally (`totalResponders: 0`) |
+
+**Default to `createSSRInquiryBridge`** for any new service that properly registers intents. `delegateQuery` is a workaround specific to cadenza-db-service.
+
+## delegateQuery Pattern (cadenza-db tables)
 
 ```ts
 import { getQuery } from 'h3';
@@ -32,7 +40,7 @@ export default defineEventHandler(async (event) => {
 });
 ```
 
-## Delegation Task Names
+## Delegation Task Names (cadenza-db tables)
 
 | Table | Task name |
 |---|---|
@@ -67,3 +75,4 @@ Response fields are camelCase. Filter fields are snake_case.
 - **activity/service_instance**: `filter: { deleted: false }`
 - **activity/signal_emission**: `filter: { is_meta: false }`
 - **activity/routine_execution, task_execution, execution_trace**: no filter
+

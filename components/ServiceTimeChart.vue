@@ -2,24 +2,23 @@
   <InfoCard>
     <template #title> Service Statistics </template>
     <template #info>
-      <div v-if="hasData">
+      <div v-if="hasData" class="chart-fill-wrapper">
         <apexchart
           ref="mainChart"
           type="area"
-          height="300"
+          :height="chartHeight ?? '100%'"
           width="100%"
           :options="chartOptions"
           :series="chartSeries"
-          style="color: black"
+          style="color: black; flex: 1; min-height: 0;"
         ></apexchart>
-        <!-- Brush chart for scrollbar/range selection -->
         <apexchart
           type="area"
-          height="100"
+          :height="brushHeight ?? 80"
           width="100%"
           :options="brushChartOptions"
           :series="brushSeries"
-          style="color: black"
+          style="color: black; flex: 0 0 auto;"
         ></apexchart>
       </div>
 
@@ -44,6 +43,8 @@ interface AreaSeries {
 
 const props = defineProps<{
   series: AreaSeries[];
+  chartHeight?: number;
+  brushHeight?: number;
 }>();
 
 const hasData = computed(() => {
@@ -331,3 +332,11 @@ const brushChartOptions = computed(() => {
   };
 });
 </script>
+
+<style scoped>
+.chart-fill-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+</style>

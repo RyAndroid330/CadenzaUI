@@ -20,15 +20,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAppStore } from '~/stores/app';
-import Cadenza from '@cadenza.io/service';
 
+const appStore = useAppStore();
 const router = useRouter();
-const tasks = ref<any[]>([]);
 const hasMoreData = ref(false);
 const loadingMoreData = ref(false);
+let refreshIntervalId: number | null = null;
 
 const columns = [
   { name: 'name',        label: 'Name',        field: 'name',       align: 'left' as const, sortable: true },
@@ -45,22 +45,53 @@ function inspectInNewTab(t: any) {
   window.open(`/meta/tasks/${encodeURIComponent(t.name)}`, '_blank');
 }
 
-const fetchTasksTask = Cadenza.createTask('Fetch Meta Tasks', async (context) => {
-  try {
-    const data: any = await $fetch('/api/meta/tasks');
-    tasks.value = Array.isArray(data?.tasks) ? data.tasks : [];
-    hasMoreData.value = false;
-  } catch (e) {
-    console.error(e);
+appStore.setCurrentSection('meta');
+
+const {
+  data,
+  refresh,
+} = await useAsyncData('meta-tasks', async () => {
+  const response: any = await $fetch('/api/meta/tasks');
+  hasMoreData.value = false;
+  return Array.isArray(response?.tasks) ? response.tasks : [];
+});
+
+const tasks = computed(() => data.value ?? []);
+
+const projectionState = useCadenzaProjectionState();
+const runtimeReady = useCadenzaRuntimeReady();
+
+watch(
+  runtimeReady,
+  (isReady) => {
+    if (refreshIntervalId !== null) {
+      window.clearInterval(refreshIntervalId);
+      refreshIntervalId = null;
+    }
+    if (!isReady || !import.meta.client) {
+      return;
+    }
+    refreshIntervalId = window.setInterval(() => {
+      refresh();
+    }, 10000);
+  },
+  { immediate: true },
+);
+
+watch(
+  () => projectionState.value.projectionState.activityVersion,
+  (_value, previousValue) => {
+    if (previousValue !== undefined) {
+      refresh();
+    }
+  },
+);
+
+onBeforeUnmount(() => {
+  if (refreshIntervalId !== null) {
+    window.clearInterval(refreshIntervalId);
   }
-  return context;
 });
 
 function loadMoreTasks() {}
-
-onMounted(() => {
-  const appStore = useAppStore();
-  appStore.setCurrentSection('meta');
-  Cadenza.run(Cadenza.createRoutine('Init Meta Tasks', [fetchTasksTask], ''), {});
-});
 </script>

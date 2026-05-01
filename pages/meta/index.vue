@@ -10,15 +10,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { onBeforeUnmount, ref, watch } from 'vue';
 import { useAppStore } from '~/stores/app';
 import { useRouter } from 'vue-router';
-import Cadenza from '@cadenza.io/service';
 
 const nodes = ref<any[]>([]);
 const edges = ref<any[]>([]);
 const appStore = useAppStore();
 const router = useRouter();
+let refreshIntervalId: number | null = null;
 
 function buildGraphNodes(data: any) {
   const result: any[] = [];
@@ -80,16 +80,14 @@ function buildGraphEdges(data: any) {
   return [...taskEdges, ...emitEdges, ...triggerEdges];
 }
 
-const fetchMetaMapTask = Cadenza.createTask('Fetch Meta Map', async (context) => {
+function applyMetaGraph(data: any) {
   try {
-    const data: any = await $fetch('/api/meta/graph');
     nodes.value = buildGraphNodes(data);
     edges.value = buildGraphEdges(data);
   } catch (e) {
     console.error('Error loading meta map:', e);
   }
-  return context;
-});
+}
 
 function handleNodeSelected(node: any) {
   const n = node?.node || node;
@@ -105,8 +103,46 @@ function handleNodeSelected(node: any) {
   }
 }
 
-onMounted(() => {
-  appStore.setCurrentSection('meta');
-  Cadenza.run(Cadenza.createRoutine('Load Meta', [fetchMetaMapTask], ''), {});
+appStore.setCurrentSection('meta');
+
+const { refresh } = await useAsyncData('meta-graph', async () => {
+  const response: any = await $fetch('/api/meta/graph');
+  applyMetaGraph(response);
+  return true;
+});
+
+const projectionState = useCadenzaProjectionState();
+const runtimeReady = useCadenzaRuntimeReady();
+
+watch(
+  runtimeReady,
+  (isReady) => {
+    if (refreshIntervalId !== null) {
+      window.clearInterval(refreshIntervalId);
+      refreshIntervalId = null;
+    }
+    if (!isReady || !import.meta.client) {
+      return;
+    }
+    refreshIntervalId = window.setInterval(() => {
+      refresh();
+    }, 10000);
+  },
+  { immediate: true },
+);
+
+watch(
+  () => projectionState.value.projectionState.activityVersion,
+  (_value, previousValue) => {
+    if (previousValue !== undefined) {
+      refresh();
+    }
+  },
+);
+
+onBeforeUnmount(() => {
+  if (refreshIntervalId !== null) {
+    window.clearInterval(refreshIntervalId);
+  }
 });
 </script>

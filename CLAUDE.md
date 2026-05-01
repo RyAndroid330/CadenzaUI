@@ -1,8 +1,14 @@
 # CadenzaUI — Claude Code Guide
 
+## Reference Implementation
+
+**Canonical pattern source**: `cadenza-demo-2/frontend/` — all data fetching, signal binding, and plugin patterns should follow this project. When in doubt, check there first.
+
+**Cadenza demo lessons**: `cadenza-demo-2/docs/demo-lessons.md`
+
 ## Project Overview
 
-Nuxt 3 SPA dashboard for the cadenza-demo-2 system. Connects to the same Docker stack as demo-2 (cadenza-db-service + PostgreSQL). Displays services, routines, tasks, signals, and execution activity through tables.
+Nuxt 3 SPA dashboard for the cadenza-demo-2 system. Connects to the same Docker stack (cadenza-db-service + PostgreSQL). Displays services, routines, tasks, signals, and execution activity through tables, flow diagrams, and charts.
 
 ## Commands
 
@@ -14,39 +20,139 @@ npm run build     # Production build
 ## Environment Variables (`.env`)
 
 ```
-CADENZA_DB_ADDRESS=http://cadenza-db.localhost   # Full URL or hostname
-CADENZA_DB_PORT=80                               # Port (80 via edge proxy locally)
 NUXT_PUBLIC_CADENZA_BOOTSTRAP_URL=http://cadenza-db.localhost:80
+CADENZA_SERVER_ADDRESS=http://cadenza-db.localhost
+CADENZA_SERVER_PORT=80
 ```
 
-In Docker: `CADENZA_DB_ADDRESS=cadenza-db-service`, `CADENZA_DB_PORT=8080`.
+In Docker: `CADENZA_SERVER_ADDRESS=cadenza-db-service`, `CADENZA_SERVER_PORT=8080`.
 
 ## Architecture
 
 ```
 Browser (Vue SPA)
-  └── useAsyncData(() => $fetch('/api/...'))  → Nuxt server routes
+  ├── defineCadenzaNuxtRuntimePlugin        → WebSocket to cadenza-db-service
+  │     └── signalBindings                  → projectionState updates on signal receipt
+  └── useAsyncData / useFetch               → Nuxt server routes (SSR snapshot only)
 
 Nuxt Server (Node)
-  └── server/api/**/*.ts                      → delegateQuery() to cadenza-db-service
-      └── server/utils/cadenza/bridge.ts      → POST /delegation endpoint
-
-cadenza-db-service (Docker)
-  └── /delegation endpoint                    → queries internal postgres tables
+  ├── server/api/**/*.ts                    → SSR data via createSSRInquiryBridge
+  │     └── bridge.inquire(intent, ctx)     → cadenza inquiry routing
+  └── delegateQuery (cadenza-db tables only)
+        └── POST /delegation on cadenza-db-service
 ```
 
-## Data Fetching Pattern
+## Data Fetching Principles
 
-**Pages** use `useAsyncData` wrapping `$fetch`:
+**Rule**: Use Cadenza-native patterns exclusively. No raw `pg.Client`, no HTTP polling, no direct database access.
+
+1. **Live reactive data** → `signalBindings` in the browser plugin. The `projectionState` is the source of truth for anything that changes while the user is on the page.
+2. **Initial snapshot (SSR)** → `createSSRInquiryBridge` + `bridge.inquire()` in server API routes. This is the standard Cadenza SSR pattern.
+3. **cadenza-db-service tables only (exception)** → `delegateQuery` → `/delegation` endpoint. cadenza-db-service does not register its postgres actor intents as external inquiry responders (`totalResponders: 0`), so the inquiry bridge cannot reach those tables. Use `delegateQuery` only for: `service`, `task`, `routine`, `signal_registry`, `service_instance`, `routine_execution`, `task_execution`, `signal_emission`, `execution_trace`.
+
+## Browser Plugin (`plugins/cadenza.client.ts`)
+
+Use `defineCadenzaNuxtRuntimePlugin` from `@cadenza.io/service/nuxt` — this is the standard Cadenza Nuxt integration:
+
 ```ts
-const { data } = await useAsyncData('cache-key', () =>
-  $fetch<{ items: any[] }>('/api/section/resource'),
+import Cadenza from '@cadenza.io/service';
+import { defineCadenzaNuxtRuntimePlugin } from '@cadenza.io/service/nuxt';
+
+const setup = defineCadenzaNuxtRuntimePlugin({
+  cadenza: Cadenza,
+  actorName: 'CadenzaUIRuntimeActor',
+  service: {
+    name: 'CadenzaUI',
+    description: 'CadenzaUI dashboard runtime',
+    useSocket: true,
+    cadenzaDB: { connect: true },
+  },
+  bootstrapUrl: (config) => String(config.public.cadenzaBootstrapUrl),
+  initialProjectionState: {
+    activityVersion: 0,
+    lastSignalName: null as string | null,
+  },
+  signalBindings: IOT_ACTIVITY_SIGNALS.map((signalName) => ({
+    signal: signalName,
+    reduce: (current, _payload) => ({
+      ...current,
+      activityVersion: current.activityVersion + 1,
+      lastSignalName: signalName,
+    }),
+  })),
+});
+
+export default defineNuxtPlugin(setup);
+```
+
+**Do not use `createBrowserRuntimeActor` directly** — `defineCadenzaNuxtRuntimePlugin` wraps it with proper Nuxt lifecycle integration, hydration state, and SSR-safe composables.
+
+## Cadenza Composables
+
+The plugin exposes three composables (auto-imported via Nuxt):
+
+```ts
+const projectionState = useCadenzaProjectionState();
+// projectionState.value.projectionState.activityVersion — updates on signal receipt
+
+const runtimeReady = useCadenzaRuntimeReady();
+// runtimeReady.value — true once WebSocket connected and runtime bootstrapped
+
+const runtime = useCadenzaRuntime();
+// runtime.value.inquire(intentName, ctx, opts) — issue inquiries from the browser
+```
+
+## Signal-Driven Page Pattern
+
+Pages react to signals, not polling intervals:
+
+```vue
+<script setup lang="ts">
+const { data, refresh } = await useAsyncData('services', () => $fetch('/api/system/services'));
+const projectionState = useCadenzaProjectionState();
+
+// Re-fetch the SSR snapshot whenever a new signal arrives
+watch(
+  () => projectionState.value.projectionState.activityVersion,
+  () => refresh(),
 );
-const items = computed(() => data.value?.items ?? []);
+</script>
 ```
 
-**Server API routes** use `delegateQuery` from bridge.ts — do NOT use `pg.Client` or `createSSRInquiryBridge`:
+**Do not use `setInterval` polling** for primary data refresh. Signal-driven `watch` is the correct pattern.
+
+## Server API — SSR Snapshot Pattern
+
+For tables served by `iot-db-service` or other services that register inquiry intents:
+
 ```ts
+import { createSSRInquiryBridge } from '@cadenza.io/service';
+
+export default defineEventHandler(async (event) => {
+  const config = useRuntimeConfig(event);
+  const bridge = createSSRInquiryBridge({
+    cadenzaDB: {
+      address: String(config.cadenzaServerAddress ?? 'cadenza-db-service'),
+      port: Number(config.cadenzaServerPort ?? 8080),
+    },
+  });
+
+  const result = await bridge.inquire(
+    'query-pg-iot-db-service-postgres-actor-device',
+    { queryData: { sort: { name: 'asc' }, limit: 200 } },
+    { requireComplete: true, rejectOnTimeout: true, timeout: 5000 },
+  );
+
+  return { items: result?.rows ?? [] };
+});
+```
+
+## Server API — cadenza-db Tables (Exception Pattern)
+
+For `service`, `task`, `routine`, `signal_registry`, `service_instance`, and execution tables — use `delegateQuery` since cadenza-db-service has `totalResponders: 0` for the inquiry broker:
+
+```ts
+import { getQuery } from 'h3';
 import { delegateQuery } from '~/server/utils/cadenza/bridge';
 
 export default defineEventHandler(async (event) => {
@@ -54,14 +160,25 @@ export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig(event);
   const address = String(config.cadenzaServerAddress ?? 'http://cadenza-db.localhost');
   const port = Number(config.cadenzaServerPort ?? 80);
-  const rows = await delegateQuery(address, port, 'Query table_name', {
+  const q = getQuery(event);
+  const limit = Math.min(parseInt((q.limit as string) || '200', 10) || 200, 500);
+
+  const rows = await delegateQuery<Record<string, unknown>>(address, port, 'Query service', {
     filter: { is_meta: false },   // snake_case filter keys
     sort: { name: 'asc' },
     limit,
   });
-  return { items: rows.map((row) => ({ name: String(row.name ?? '') })) };
+
+  return {
+    services: rows.map((row) => ({
+      name: String(row.name ?? ''),
+      description: String(row.description ?? ''),
+    })),
+  };
 });
 ```
+
+See `server/api/CLAUDE.md` for delegation task names and field reference.
 
 ## Critical: camelCase vs snake_case
 
@@ -100,65 +217,41 @@ Table navigation uses `row.uuid || row.name` — `||` (not `??`) so empty string
 ```
 pages/
 ├── system/          → Definition tables (is_meta: false)
-│   ├── services/    → Query service
-│   ├── tasks/       → Query task
-│   ├── routines/    → Query routine
-│   └── signals/     → Query signal_registry
+│   ├── services/
+│   ├── tasks/
+│   ├── routines/
+│   └── signals/
 ├── activity/        → Execution/runtime tables (no is_meta filter)
-│   ├── index        → Query service_instance (deleted: false)
-│   ├── routines/    → Query routine_execution
-│   ├── tasks/       → Query task_execution
-│   ├── signals/     → Query signal_emission
-│   └── traces/      → Query execution_trace
+│   ├── index        → service_instance (deleted: false)
+│   ├── routines/    → routine_execution
+│   ├── tasks/       → task_execution
+│   ├── signals/     → signal_emission
+│   └── traces/      → execution_trace
 └── meta/            → Definition tables (is_meta: true)
-    ├── index        → Query service
-    ├── routines/    → Query routine
-    ├── tasks/       → Query task
-    └── signals/     → Query signal_registry
+    ├── index        → service
+    ├── routines/
+    ├── tasks/
+    └── signals/
 ```
 
 Each index page has a corresponding `[id].vue` detail page.
 
-## Table Component (`components/Table.vue`)
+## Key Components
 
-Key props:
-- `inspect-base-path="/section/resource"` — enables inspect button navigation to `[id]` page
-- `:has-more-data="false"` — disables infinite scroll for static lists
-- `row-key` — use `"name"` for definition tables, `"uuid"` for execution tables
-
-Stop and Generate Trace action buttons are placeholder dialogs.
-
-## Server API Routes
-
-```
-server/api/
-├── system/
-│   ├── services.ts
-│   ├── tasks.ts
-│   ├── routines.ts
-│   └── signals.ts
-├── activity/
-│   ├── index.ts       (service_instance)
-│   ├── routines.ts    (routine_execution)
-│   ├── tasks.ts       (task_execution)
-│   ├── signals.ts     (signal_emission)
-│   └── traces.ts      (execution_trace)
-└── meta/
-    ├── index.ts       (service, is_meta: true)
-    ├── routines.ts
-    ├── tasks.ts
-    └── signals.ts
-
-server/utils/cadenza/bridge.ts   ← delegateQuery() utility
-```
+| Component | Purpose |
+|---|---|
+| `Table.vue` | Generic paginated table with infinite scroll |
+| `hybridFlowMap.vue` | Combined activity + static graph view (ELK hierarchical layout) |
+| `NestedFlowMap.vue` | System-page hierarchical Vue Flow diagram (ELK) |
+| `CustomNode.vue` / `CustomEdge.vue` | Vue Flow node and edge renderers |
+| `HeatMap.vue` | Execution frequency heatmap |
+| `ServiceLog.vue` | Service log viewer with severity filtering |
 
 ## What NOT To Do
 
-- **Do not use `pg.Client`** — no direct postgres connection needed; `delegateQuery` covers all cadenza-db tables
-- **Do not use `createSSRInquiryBridge`** — only works for iot-db-service intents (device, alert, telemetry, health_metric), not cadenza-db internal tables
-- **Do not use `CadenzaService.inquire()`** — returns `totalResponders: 0` for all cadenza-db query IDs
-- **Do not add `@cadenza.io/service` to `build.transpile`** — causes TypeScript ESM bundling errors
-
-## Cadenza Browser Plugin (`plugins/cadenza.client.ts`)
-
-Uses `Cadenza.createBrowserRuntimeActor` directly (not `defineCadenzaNuxtRuntimePlugin`) to avoid needing `build.transpile`. Only used for live signal subscriptions via WebSocket — not for data fetching.
+- **Do not use `pg.Client`** — no direct postgres connection. `delegateQuery` covers cadenza-db tables; `bridge.inquire()` covers iot-db tables.
+- **Do not poll with `setInterval`** — use `watch(() => projectionState.value.projectionState.activityVersion, refresh)` instead.
+- **Do not use `$fetch` in a polling loop** — signals drive re-fetches; there is no need for a timer.
+- **Do not use `createBrowserRuntimeActor` directly** — use `defineCadenzaNuxtRuntimePlugin` from `@cadenza.io/service/nuxt`.
+- **Do not add `@cadenza.io/service` to `build.transpile`** in this SPA project — causes TypeScript ESM bundling errors. SSR Nuxt apps (like demo-2 frontend) DO need `build.transpile: ['@cadenza.io/service']` because `@cadenza.io/service/nuxt` uses Nuxt composables (`useState`, `useRuntimeConfig`) as bare globals that only resolve when the package is processed through the build pipeline.
+- **Do not use `createSSRInquiryBridge` for cadenza-db tables** — cadenza-db-service postgres actor intents are not externally registered (`totalResponders: 0`). Use `delegateQuery` → `/delegation` for those tables.

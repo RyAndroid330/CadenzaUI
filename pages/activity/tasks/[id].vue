@@ -112,10 +112,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAppStore } from '~/stores/app';
-import Cadenza from '@cadenza.io/service';
 
 const route = useRoute();
 const router = useRouter();
@@ -124,6 +123,7 @@ const appStore = useAppStore();
 const taskExecution = ref<any>(null);
 const taskMap = ref<any[]>([]);
 const showGenerateDialog = ref(false);
+let refreshIntervalId: number | null = null;
 
 function getId() {
   return String(Array.isArray(route.params.id) ? route.params.id[0] : route.params.id);
@@ -142,15 +142,14 @@ function getDuration(start?: string, end?: string) {
   return ((e - s) / 1000).toFixed(2);
 }
 
-const fetchExecutionTask = Cadenza.createTask('Fetch Activity Task Execution', async (context) => {
+async function loadExecution() {
   const id = getId();
   try {
     taskExecution.value = await $fetch(`/api/activity/tasks/${id}`);
   } catch (e) { console.error(e); }
-  return context;
-});
+}
 
-const fetchMapTask = Cadenza.createTask('Fetch Activity Task Map', async (context) => {
+async function loadMap() {
   const id = getId();
   try {
     const data: any = await $fetch(`/api/activity/tasks/tasksInRoutines?task_execution_id=${id}`);
@@ -159,8 +158,7 @@ const fetchMapTask = Cadenza.createTask('Fetch Activity Task Map', async (contex
   } catch (e) {
     taskMap.value = [];
   }
-  return context;
-});
+}
 
 function onItemSelected(item: any) {
   if (!item) return;
@@ -173,8 +171,49 @@ function onItemSelected(item: any) {
   }
 }
 
-onMounted(async () => {
-  appStore.setCurrentSection('serviceActivity');
-  await Cadenza.run(Cadenza.createRoutine('Load Activity Task', [fetchExecutionTask, fetchMapTask], ''), {});
+async function loadAll() {
+  await Promise.all([loadExecution(), loadMap()]);
+}
+
+appStore.setCurrentSection('serviceActivity');
+
+const { refresh } = await useAsyncData(`activity-task-detail:${getId()}`, async () => {
+  await loadAll();
+  return true;
+});
+
+const projectionState = useCadenzaProjectionState();
+const runtimeReady = useCadenzaRuntimeReady();
+
+watch(
+  runtimeReady,
+  (isReady) => {
+    if (refreshIntervalId !== null) {
+      window.clearInterval(refreshIntervalId);
+      refreshIntervalId = null;
+    }
+    if (!isReady || !import.meta.client) {
+      return;
+    }
+    refreshIntervalId = window.setInterval(() => {
+      refresh();
+    }, 10000);
+  },
+  { immediate: true },
+);
+
+watch(
+  () => projectionState.value.projectionState.activityVersion,
+  (_value, previousValue) => {
+    if (previousValue !== undefined) {
+      refresh();
+    }
+  },
+);
+
+onBeforeUnmount(() => {
+  if (refreshIntervalId !== null) {
+    window.clearInterval(refreshIntervalId);
+  }
 });
 </script>

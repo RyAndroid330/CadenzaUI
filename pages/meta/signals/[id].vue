@@ -36,10 +36,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAppStore } from '~/stores/app';
-import Cadenza from '@cadenza.io/service';
 
 const route = useRoute();
 const router = useRouter();
@@ -47,6 +46,7 @@ const appStore = useAppStore();
 const loading = ref(true);
 const data = ref<any>(null);
 const flowItems = ref<any[]>([]);
+let refreshIntervalId: number | null = null;
 
 function getId() {
   return String(Array.isArray(route.params.id) ? route.params.id[0] : route.params.id);
@@ -59,7 +59,7 @@ function onItemSelected(item: any) {
   if (name) router.push(`/meta/tasks/${encodeURIComponent(name)}`);
 }
 
-const fetchAllTask = Cadenza.createTask('Fetch Meta Signal Definition', async (context) => {
+async function loadAll() {
   const id = getId();
   const sigId = `signal:${id}`;
   const [defResult, graphResult] = await Promise.allSettled([
@@ -93,16 +93,52 @@ const fetchAllTask = Cadenza.createTask('Fetch Meta Signal Definition', async (c
     }
     flowItems.value = items;
   }
-  return context;
-});
+}
 
-onMounted(async () => {
-  appStore.setCurrentSection('meta');
+appStore.setCurrentSection('meta');
+
+const { refresh } = await useAsyncData(`meta-signal-detail:${getId()}`, async () => {
   loading.value = true;
   try {
-    await Cadenza.run(Cadenza.createRoutine('Load Meta Signal', [fetchAllTask], ''), {});
+    await loadAll();
   } finally {
     loading.value = false;
+  }
+  return true;
+});
+
+const projectionState = useCadenzaProjectionState();
+const runtimeReady = useCadenzaRuntimeReady();
+
+watch(
+  runtimeReady,
+  (isReady) => {
+    if (refreshIntervalId !== null) {
+      window.clearInterval(refreshIntervalId);
+      refreshIntervalId = null;
+    }
+    if (!isReady || !import.meta.client) {
+      return;
+    }
+    refreshIntervalId = window.setInterval(() => {
+      refresh();
+    }, 10000);
+  },
+  { immediate: true },
+);
+
+watch(
+  () => projectionState.value.projectionState.activityVersion,
+  (_value, previousValue) => {
+    if (previousValue !== undefined) {
+      refresh();
+    }
+  },
+);
+
+onBeforeUnmount(() => {
+  if (refreshIntervalId !== null) {
+    window.clearInterval(refreshIntervalId);
   }
 });
 </script>

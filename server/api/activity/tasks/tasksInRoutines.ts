@@ -1,3 +1,4 @@
+import { useRuntimeConfig } from '#imports';
 import { getQuery } from 'h3';
 import { delegateQuery } from '~/server/utils/cadenza/bridge';
 
@@ -92,3 +93,4 @@ function buildNode(row: Record<string, unknown>) {
     previousTaskExecutionName: prevIds.length > 0 ? prevIds[0] : null,
   };
 }
+

@@ -42,48 +42,38 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useAppStore } from '~/stores/app';
 import CollapsibleSection from '~/components/CollapsibleSection.vue';
-import Cadenza from '@cadenza.io/service';
 
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const defaultHeatmapRanges = [{ from: 1, to: 10 }, { from: 11, to: 50 }, { from: 51, to: 100 }, { from: 101, to: 99999 }];
 
 const appStore = useAppStore();
-const activeInstances = ref<any[]>([]);
+const serverLoad = ref<{ cpu: number; gpu: number; ram: number; latency: number; instanceCount: number } | null>(null);
 const heatmapRawData = ref<any[]>([]);
 const heatmapYearOptions = ref<number[]>([new Date().getFullYear()]);
 const isLoadingServerStats = ref(false);
 const isLoadingHeatmap = ref(false);
+let refreshIntervalId: number | null = null;
 
 const hasHeatmapData = computed(() => heatmapRawData.value.length > 0);
-const aggregatedServer = computed(() => {
-  const list = activeInstances.value;
-  if (!list.length) return { cpu: 0, gpu: 0, ram: 0 };
-  const n = list.length;
-  return {
-    cpu: list.reduce((s, i) => s + (i.cpu || 0), 0) / n,
-    gpu: list.reduce((s, i) => s + (i.gpu || 0), 0) / n,
-    ram: list.reduce((s, i) => s + (i.ram || 0), 0) / n,
-  };
-});
+const aggregatedServer = computed(() => serverLoad.value ?? { cpu: 0, gpu: 0, ram: 0 });
+const activeInstances = computed(() => serverLoad.value?.instanceCount ? [{}] : []);
 
-const fetchServerStatsTask = Cadenza.createTask('Fetch Server Stats Home', async (context) => {
+async function fetchServerLoad() {
   try {
-    const data: any = await $fetch('/api/activity/servers');
-    activeInstances.value = data?.instances ?? [];
+    const data: any = await $fetch('/api/stats/server-load');
+    serverLoad.value = data;
   } catch (e) {
     console.error(e);
   } finally {
     isLoadingServerStats.value = false;
   }
-  return context;
-});
+}
 
-const fetchHeatmapTask = Cadenza.createTask('Fetch Heatmap Home', async (context) => {
+function applyHeatmapData(data: any) {
   try {
-    const data: any = await $fetch('/api/heatmap/routines');
     const raw = data?.data ?? [];
     heatmapRawData.value = raw;
     const years = new Set<number>();
@@ -94,16 +84,52 @@ const fetchHeatmapTask = Cadenza.createTask('Fetch Heatmap Home', async (context
   } finally {
     isLoadingHeatmap.value = false;
   }
-  return context;
-});
+}
 
-onMounted(() => {
-  appStore.setCurrentSection('');
-  appStore.setLoggedIn(true);
+appStore.setCurrentSection('');
+appStore.setLoggedIn(true);
+
+const { refresh } = await useAsyncData('home-dashboard-overview', async () => {
   isLoadingServerStats.value = true;
   isLoadingHeatmap.value = true;
-  Cadenza.run(Cadenza.createRoutine('Home Stats', [fetchServerStatsTask], ''), {});
-  Cadenza.run(Cadenza.createRoutine('Home Heatmap', [fetchHeatmapTask], ''), {});
+  const [serverLoadData, heatmapData] = await Promise.all([
+    $fetch('/api/stats/server-load'),
+    $fetch('/api/heatmap/routines'),
+  ]);
+  serverLoad.value = serverLoadData as any;
+  applyHeatmapData(heatmapData);
+  return true;
+});
+
+const projectionState = useCadenzaProjectionState();
+const runtimeReady = useCadenzaRuntimeReady();
+
+watch(
+  () => projectionState.value.projectionState.activityVersion,
+  (_value, prev) => { if (prev !== undefined) refresh(); },
+);
+
+watch(
+  runtimeReady,
+  (isReady) => {
+    if (refreshIntervalId !== null) {
+      window.clearInterval(refreshIntervalId);
+      refreshIntervalId = null;
+    }
+    if (!isReady || !import.meta.client) {
+      return;
+    }
+    refreshIntervalId = window.setInterval(() => {
+      refresh();
+    }, 10000);
+  },
+  { immediate: true },
+);
+
+onBeforeUnmount(() => {
+  if (refreshIntervalId !== null) {
+    window.clearInterval(refreshIntervalId);
+  }
 });
 </script>
 

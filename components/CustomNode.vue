@@ -24,6 +24,8 @@ interface NodeData {
   isInChain?: boolean;
   isHovered?: boolean;
   isExternalService?: boolean;
+  isActive?: boolean;
+  activeCount?: number;
 }
 
 const props = defineProps<{ data: NodeData }>();
@@ -91,6 +93,12 @@ const nodeSelectedBg = computed(() => {
 const nodeSelectedBorder = computed(() =>
   $q.dark.isActive ? '2px solid #fff' : '2px solid #222'
 );
+
+// Fixed colors for active (activity/warning) and static (system/primary) states
+const activeNodeBg = computed(() => colors.getPaletteColor('warning'));
+const staticNodeBg = computed(() => colors.changeAlpha(colors.getPaletteColor('primary'), 0.7));
+const signalActiveColor = computed(() => colors.getPaletteColor('warning'));
+const signalStaticColor = computed(() => colors.getPaletteColor('primary'));
 </script>
 
 <template>
@@ -113,23 +121,25 @@ const nodeSelectedBorder = computed(() =>
       data.isInChain ? 'chain-node' : '',
       data.isHovered ? 'hovered-node' : '',
       data.isExternalService ? 'external-service-node' : '',
+      data.signal && data.isActive === true ? 'signal-active' : '',
+      data.signal && data.isActive === false ? 'signal-static' : '',
     ]"
     :style="
-      data.isSelected
-        ? {
-            ...(data.signal || data.intent || data.inquiry ? {} : { background: nodeSelectedBg }),
-            border: nodeSelectedBorder,
-            boxShadow: `0px 0px 6px ${
-              typeof nodeBg === 'string' ? nodeBg : nodeBg
-            }`,
-          }
-        : {
-            ...(data.signal || data.intent || data.inquiry ? {} : { background: nodeSelectedBg }),
-            border: 'none',
-            boxShadow: `0px 0px 6px ${
-              typeof nodeBg === 'string' ? nodeBg : nodeBg
-            }`,
-          }
+      data.isActive === true
+        ? { background: activeNodeBg, border: 'none', boxShadow: `0px 0px 8px ${activeNodeBg}` }
+        : data.isActive === false
+          ? { background: staticNodeBg, border: 'none', boxShadow: `0px 0px 6px ${staticNodeBg}` }
+          : data.isSelected
+            ? {
+                ...(data.signal || data.intent || data.inquiry ? {} : { background: nodeSelectedBg }),
+                border: nodeSelectedBorder,
+                boxShadow: `0px 0px 6px ${nodeBg}`,
+              }
+            : {
+                ...(data.signal || data.intent || data.inquiry ? {} : { background: nodeBg }),
+                border: 'none',
+                boxShadow: `0px 0px 6px ${nodeBg}`,
+              }
     "
     role="button"
     tabindex="0"
@@ -156,6 +166,9 @@ const nodeSelectedBorder = computed(() =>
       {{ data.is_unique ? 'Unique' : 'Not Unique' }}<br />
       Concurrency: {{ data.concurrency }}<br/>
     </q-tooltip>
+    <span v-if="data.isActive === true && data.activeCount" class="active-count-badge">
+      {{ data.activeCount }}
+    </span>
     <template v-if="data.signal || data.intent || data.inquiry">
       <Handle type="target" :position="Position.Left" />
       <Handle type="source" :position="Position.Right" />
@@ -179,6 +192,8 @@ const nodeSelectedBorder = computed(() =>
   margin: 0 !important;
 }
 .custom-node {
+  position: relative;
+  overflow: visible;
   color: white;
   border-radius: 4px;
   text-align: left;
@@ -187,8 +202,26 @@ const nodeSelectedBorder = computed(() =>
   overflow-wrap: break-word;
   transition: background 0.2s;
   padding: 5px;
+}
 
-
+.active-count-badge {
+  position: absolute;
+  bottom: -7px;
+  right: -7px;
+  background: rgba(0, 0, 0, 0.78);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  border-radius: 50%;
+  min-width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+  z-index: 10;
+  line-height: 1;
+  pointer-events: none;
 }
 /* When any node is hovered, darken all nodes */
 .vue-flow:has(.custom-node:hover) .custom-node {
@@ -224,7 +257,8 @@ const nodeSelectedBorder = computed(() =>
   background: rgba(216 218 216 / 0.88) !important;
   align-content: center !important;
   word-wrap: break-word !important;
-  color: v-bind('nodeSelectedBg') !important;
+  color: #000 !important;
+  text-shadow: 0 0 6px v-bind('nodeSelectedBg'), 0 0 10px v-bind('nodeSelectedBg');
   position: relative;
   overflow: visible;
 }
@@ -452,5 +486,43 @@ const nodeSelectedBorder = computed(() =>
   background: rgba(230, 126, 34, 0.12) !important;
   border: 2px dashed rgba(230, 126, 34, 0.5) !important;
   box-shadow: 0px 0px 6px rgba(230, 126, 34, 0.2) !important;
+}
+
+.signal-node.signal-active {
+  color: #000 !important;
+  text-shadow: 0 0 6px v-bind('signalActiveColor'), 0 0 10px v-bind('signalActiveColor');
+}
+
+.signal-node.signal-active::before,
+.signal-node.signal-active::after {
+  animation: pulseSignalActive 1.6s ease-out infinite;
+}
+
+.signal-node.signal-active::after {
+  animation-delay: 0.4s;
+}
+
+@keyframes pulseSignalActive {
+  0% { box-shadow: 0px 0px 0px 0px v-bind('signalActiveColor'); opacity: 0.8; }
+  100% { box-shadow: 0px 0px 0px 15px rgba(0, 0, 0, 0); opacity: 0; }
+}
+
+.signal-node.signal-static {
+  color: #000 !important;
+  text-shadow: 0 0 6px v-bind('signalStaticColor'), 0 0 10px v-bind('signalStaticColor');
+}
+
+.signal-node.signal-static::before,
+.signal-node.signal-static::after {
+  animation: pulseSignalStatic 1.6s ease-out infinite;
+}
+
+.signal-node.signal-static::after {
+  animation-delay: 0.4s;
+}
+
+@keyframes pulseSignalStatic {
+  0% { box-shadow: 0px 0px 0px 0px v-bind('signalStaticColor'); opacity: 0.8; }
+  100% { box-shadow: 0px 0px 0px 15px rgba(0, 0, 0, 0); opacity: 0; }
 }
 </style>

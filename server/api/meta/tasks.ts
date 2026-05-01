@@ -1,3 +1,4 @@
+import { useRuntimeConfig } from '#imports';
 import { delegateQuery } from '~/server/utils/cadenza/bridge';
 
 export default defineEventHandler(async (event) => {
@@ -24,3 +25,4 @@ export default defineEventHandler(async (event) => {
     })),
   };
 });
+

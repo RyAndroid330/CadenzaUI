@@ -69,10 +69,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAppStore } from '~/stores/app';
-import Cadenza from '@cadenza.io/service';
 
 const route = useRoute();
 const router = useRouter();
@@ -80,6 +79,7 @@ const appStore = useAppStore();
 const loading = ref(true);
 const data = ref<any>(null);
 const flowItems = ref<any[]>([]);
+let refreshIntervalId: number | null = null;
 
 function formatDate(d: string) {
   const dt = new Date(d);
@@ -126,22 +126,58 @@ function buildFlowItems() {
   flowItems.value = items;
 }
 
-const fetchTask = Cadenza.createTask('Fetch Signal Emission Detail', async (context) => {
+async function loadAll() {
   const id = String(Array.isArray(route.params.id) ? route.params.id[0] : route.params.id);
   try {
     data.value = await $fetch(`/api/activity/signals/${id}`);
     buildFlowItems();
   } catch (e) { console.error(e); }
-  return context;
-});
+}
 
-onMounted(async () => {
-  appStore.setCurrentSection('serviceActivity');
+appStore.setCurrentSection('serviceActivity');
+
+const { refresh } = await useAsyncData(`activity-signal-detail:${getId()}`, async () => {
   loading.value = true;
   try {
-    await Cadenza.run(Cadenza.createRoutine('Load Signal Emission', [fetchTask], ''), {});
+    await loadAll();
   } finally {
     loading.value = false;
+  }
+  return true;
+});
+
+const projectionState = useCadenzaProjectionState();
+const runtimeReady = useCadenzaRuntimeReady();
+
+watch(
+  runtimeReady,
+  (isReady) => {
+    if (refreshIntervalId !== null) {
+      window.clearInterval(refreshIntervalId);
+      refreshIntervalId = null;
+    }
+    if (!isReady || !import.meta.client) {
+      return;
+    }
+    refreshIntervalId = window.setInterval(() => {
+      refresh();
+    }, 10000);
+  },
+  { immediate: true },
+);
+
+watch(
+  () => projectionState.value.projectionState.activityVersion,
+  (_value, previousValue) => {
+    if (previousValue !== undefined) {
+      refresh();
+    }
+  },
+);
+
+onBeforeUnmount(() => {
+  if (refreshIntervalId !== null) {
+    window.clearInterval(refreshIntervalId);
   }
 });
 </script>

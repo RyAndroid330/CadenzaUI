@@ -46,10 +46,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onBeforeUnmount, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAppStore } from '~/stores/app';
-import Cadenza from '@cadenza.io/service';
 
 const route = useRoute();
 const router = useRouter();
@@ -60,6 +59,7 @@ const graphEdges = ref<any[]>([]);
 const taskSignalEdges = ref<any[]>([]);
 const signalToTaskEdges = ref<any[]>([]);
 const instances = ref<any[]>([]);
+let refreshIntervalId: number | null = null;
 
 const instanceColumns = [
   { name: 'service',   label: 'Service',  field: 'service',   align: 'left' as const, sortable: true },
@@ -135,7 +135,7 @@ function getId() {
   return String(Array.isArray(route.params.id) ? route.params.id[0] : route.params.id);
 }
 
-const fetchAllTask = Cadenza.createTask('Fetch System Service Detail', async (context) => {
+async function loadAll() {
   const id = getId();
   const [defData, graphData, instanceData] = await Promise.allSettled([
     $fetch<any>(`/api/system/services/${encodeURIComponent(id)}`),
@@ -150,8 +150,7 @@ const fetchAllTask = Cadenza.createTask('Fetch System Service Detail', async (co
     signalToTaskEdges.value = graphData.value?.signalToTaskEdges ?? [];
   }
   if (instanceData.status === 'fulfilled') instances.value = instanceData.value?.instances ?? [];
-  return context;
-});
+}
 
 function onFlowItemSelected(item: any) {
   if (!item) return;
@@ -163,13 +162,50 @@ function onFlowItemSelected(item: any) {
   }
 }
 
-onMounted(async () => {
-  appStore.setCurrentSection('system');
+appStore.setCurrentSection('system');
+
+const { refresh } = await useAsyncData(`system-service-detail:${getId()}`, async () => {
   loading.value = true;
   try {
-    await Cadenza.run(Cadenza.createRoutine('Load System Service', [fetchAllTask], ''), {});
+    await loadAll();
   } finally {
     loading.value = false;
+  }
+  return true;
+});
+
+const projectionState = useCadenzaProjectionState();
+const runtimeReady = useCadenzaRuntimeReady();
+
+watch(
+  runtimeReady,
+  (isReady) => {
+    if (refreshIntervalId !== null) {
+      window.clearInterval(refreshIntervalId);
+      refreshIntervalId = null;
+    }
+    if (!isReady || !import.meta.client) {
+      return;
+    }
+    refreshIntervalId = window.setInterval(() => {
+      refresh();
+    }, 10000);
+  },
+  { immediate: true },
+);
+
+watch(
+  () => projectionState.value.projectionState.activityVersion,
+  (_value, previousValue) => {
+    if (previousValue !== undefined) {
+      refresh();
+    }
+  },
+);
+
+onBeforeUnmount(() => {
+  if (refreshIntervalId !== null) {
+    window.clearInterval(refreshIntervalId);
   }
 });
 </script>

@@ -20,17 +20,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAppStore } from '~/stores/app';
-import Cadenza from '@cadenza.io/service';
 
+const appStore = useAppStore();
 const router = useRouter();
-const traces = ref<any[]>([]);
 const hasMoreData = ref(false);
 const loadingMoreData = ref(false);
 const currentPage = ref(1);
 const pageSize = 50;
+let refreshIntervalId: number | null = null;
 
 const columns = [
   { name: 'uuid',    label: 'UUID',    field: 'uuid',    align: 'left' as const },
@@ -45,43 +45,82 @@ function inspectInNewTab(t: any) {
   window.open(`/activity/traces/${t.uuid}`, '_blank');
 }
 
-const fetchTracesTask = Cadenza.createTask('Fetch Traces', async (context) => {
+function normalizeTraces(data: any) {
+  const incoming = Array.isArray(data) ? data : [];
+  hasMoreData.value = incoming.length === pageSize;
+  return incoming;
+}
+
+appStore.setCurrentSection('serviceActivity');
+
+const {
+  data,
+  refresh,
+} = await useAsyncData('activity-traces', async () => {
   currentPage.value = 1;
-  try {
-    const data: any = await $fetch(`/api/activity/traces/traces?page=1&limit=${pageSize}`);
-    traces.value = Array.isArray(data) ? data : [];
-    hasMoreData.value = traces.value.length === pageSize;
-  } catch (e) {
-    console.error(e);
-    hasMoreData.value = false;
-  }
-  return context;
+  const response = await $fetch(`/api/activity/traces/traces?page=1&limit=${pageSize}`);
+  return normalizeTraces(response);
 });
 
-const loadMoreTracesTask = Cadenza.createTask('Load More Traces', async (context) => {
+const traces = computed(() => data.value ?? []);
+
+const projectionState = useCadenzaProjectionState();
+const runtimeReady = useCadenzaRuntimeReady();
+
+watch(
+  runtimeReady,
+  (isReady) => {
+    if (refreshIntervalId !== null) {
+      window.clearInterval(refreshIntervalId);
+      refreshIntervalId = null;
+    }
+
+    if (!isReady || !import.meta.client) {
+      return;
+    }
+
+    refreshIntervalId = window.setInterval(() => {
+      if (!loadingMoreData.value) {
+        refresh();
+      }
+    }, 10000);
+  },
+  { immediate: true },
+);
+
+watch(
+  () => projectionState.value.projectionState.activityVersion,
+  (_value, previousValue) => {
+    if (previousValue === undefined) {
+      return;
+    }
+    if (!loadingMoreData.value) {
+      refresh();
+    }
+  },
+);
+
+onBeforeUnmount(() => {
+  if (refreshIntervalId !== null) {
+    window.clearInterval(refreshIntervalId);
+  }
+});
+
+async function loadMoreTraces() {
+  if (loadingMoreData.value) {
+    return;
+  }
   loadingMoreData.value = true;
   currentPage.value++;
   try {
-    const data: any = await $fetch(`/api/activity/traces/traces?page=${currentPage.value}&limit=${pageSize}`);
-    const incoming = Array.isArray(data) ? data : [];
-    traces.value = [...traces.value, ...incoming];
-    hasMoreData.value = incoming.length === pageSize;
+    const response = await $fetch(`/api/activity/traces/traces?page=${currentPage.value}&limit=${pageSize}`);
+    const normalized = normalizeTraces(response);
+    data.value = [...(data.value ?? []), ...normalized];
   } catch (e) {
     console.error(e);
     hasMoreData.value = false;
   } finally {
     loadingMoreData.value = false;
   }
-  return context;
-});
-
-async function loadMoreTraces() {
-  Cadenza.run(loadMoreTracesTask, {});
 }
-
-onMounted(() => {
-  const appStore = useAppStore();
-  appStore.setCurrentSection('serviceActivity');
-  Cadenza.run(Cadenza.createRoutine('Init Traces', [fetchTracesTask], ''), {});
-});
 </script>

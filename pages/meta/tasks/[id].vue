@@ -78,10 +78,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAppStore } from '~/stores/app';
-import Cadenza from '@cadenza.io/service';
 
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
@@ -101,6 +100,7 @@ const hasMoreExecs = ref(false);
 const loadingMoreExecs = ref(false);
 const execPage = ref(1);
 const PAGE_SIZE = 50;
+let refreshIntervalId: number | null = null;
 
 const execColumns = [
   { name: 'uuid',       label: 'ID',       field: 'uuid',       align: 'left' as const },
@@ -147,7 +147,7 @@ function enrichChainWithSignals(chain: any[], taskSignalEdges: any[], signalToTa
   return enriched;
 }
 
-const fetchAllTask = Cadenza.createTask('Fetch Meta Task Detail', async (context) => {
+async function loadAll() {
   const id = getId();
   heatmapLoading.value = true;
   execPage.value = 1;
@@ -181,8 +181,7 @@ const fetchAllTask = Cadenza.createTask('Fetch Meta Task Detail', async (context
     heatmapYearOptions.value = years.size ? [...years].sort((a, b) => b - a) : [new Date().getFullYear()];
   }
   heatmapLoading.value = false;
-  return context;
-});
+}
 
 async function loadMoreExecutions() {
   loadingMoreExecs.value = true;
@@ -208,8 +207,47 @@ function onTaskSelected(task: any) {
   }
 }
 
-onMounted(() => {
-  appStore.setCurrentSection('meta');
-  Cadenza.run(Cadenza.createRoutine('Load Meta Task', [fetchAllTask], ''), {});
+appStore.setCurrentSection('meta');
+
+const { refresh } = await useAsyncData(`meta-task-detail:${getId()}`, async () => {
+  await loadAll();
+  return true;
+});
+
+const projectionState = useCadenzaProjectionState();
+const runtimeReady = useCadenzaRuntimeReady();
+
+watch(
+  runtimeReady,
+  (isReady) => {
+    if (refreshIntervalId !== null) {
+      window.clearInterval(refreshIntervalId);
+      refreshIntervalId = null;
+    }
+    if (!isReady || !import.meta.client) {
+      return;
+    }
+    refreshIntervalId = window.setInterval(() => {
+      if (!loadingMoreExecs.value) {
+        refresh();
+      }
+    }, 10000);
+  },
+  { immediate: true },
+);
+
+watch(
+  () => projectionState.value.projectionState.activityVersion,
+  (_value, previousValue) => {
+    if (previousValue !== undefined && !loadingMoreExecs.value) {
+      refresh();
+    }
+  },
+);
+
+onBeforeUnmount(() => {
+  if (refreshIntervalId !== null) {
+    window.clearInterval(refreshIntervalId);
+  }
 });
 </script>

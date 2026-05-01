@@ -25,6 +25,8 @@ export default defineNuxtConfig({
       alias: {
         'debug': `${__dirname}debug-shim.js`,
         typescript: `${__dirname}typescript-shim.js`,
+        'rate-limiter-flexible': `${__dirname}rate-limiter-flexible-shim.js`,
+        'rate-limiter-flexible-original': `${__dirname}node_modules/rate-limiter-flexible/index.js`,
       },
     },
   },

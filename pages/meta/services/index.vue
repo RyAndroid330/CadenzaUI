@@ -20,15 +20,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAppStore } from '~/stores/app';
-import Cadenza from '@cadenza.io/service';
 
+const appStore = useAppStore();
 const router = useRouter();
-const services = ref<any[]>([]);
 const hasMoreData = ref(false);
 const loadingMoreData = ref(false);
+let refreshIntervalId: number | null = null;
 
 const columns = [
   { name: 'name',        label: 'Name',        field: 'name',        align: 'left' as const, sortable: true },
@@ -42,22 +42,53 @@ function inspectInNewTab(s: any) {
   window.open(`/meta/services/${encodeURIComponent(s.name)}`, '_blank');
 }
 
-const fetchServicesTask = Cadenza.createTask('Fetch Meta Services List', async (context) => {
-  try {
-    const data: any = await $fetch('/api/meta');
-    services.value = Array.isArray(data?.services) ? data.services : [];
-    hasMoreData.value = false;
-  } catch (e) {
-    console.error(e);
+appStore.setCurrentSection('meta');
+
+const {
+  data,
+  refresh,
+} = await useAsyncData('meta-services', async () => {
+  const response: any = await $fetch('/api/meta');
+  hasMoreData.value = false;
+  return Array.isArray(response?.services) ? response.services : [];
+});
+
+const services = computed(() => data.value ?? []);
+
+const projectionState = useCadenzaProjectionState();
+const runtimeReady = useCadenzaRuntimeReady();
+
+watch(
+  runtimeReady,
+  (isReady) => {
+    if (refreshIntervalId !== null) {
+      window.clearInterval(refreshIntervalId);
+      refreshIntervalId = null;
+    }
+    if (!isReady || !import.meta.client) {
+      return;
+    }
+    refreshIntervalId = window.setInterval(() => {
+      refresh();
+    }, 10000);
+  },
+  { immediate: true },
+);
+
+watch(
+  () => projectionState.value.projectionState.activityVersion,
+  (_value, previousValue) => {
+    if (previousValue !== undefined) {
+      refresh();
+    }
+  },
+);
+
+onBeforeUnmount(() => {
+  if (refreshIntervalId !== null) {
+    window.clearInterval(refreshIntervalId);
   }
-  return context;
 });
 
 function loadMoreServices() {}
-
-onMounted(() => {
-  const appStore = useAppStore();
-  appStore.setCurrentSection('meta');
-  Cadenza.run(Cadenza.createRoutine('Init Meta Services', [fetchServicesTask], ''), {});
-});
 </script>

@@ -20,14 +20,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAppStore } from '~/stores/app';
-import Cadenza from '@cadenza.io/service';
 
+const appStore = useAppStore();
 const router = useRouter();
-const signals = ref<any[]>([]);
 const loading = ref(false);
+let refreshIntervalId: number | null = null;
 
 const columns = [
   { name: 'name',    label: 'Signal',  field: 'name',    align: 'left' as const, sortable: true },
@@ -41,22 +41,65 @@ function inspectInNewTab(s: any) {
   window.open(`/activity/signals/${s.uuid}`, '_blank');
 }
 
-const fetchSignalsTask = Cadenza.createTask('Fetch Active Signals', async (context) => {
+appStore.setCurrentSection('serviceActivity');
+
+const {
+  data,
+  refresh,
+} = await useAsyncData('activity-signal-emissions', async () => {
   loading.value = true;
   try {
-    const data: any = await $fetch('/api/activity/signals/activeSignals');
-    signals.value = Array.isArray(data) ? data : [];
+    const response: any = await $fetch('/api/activity/signals/activeSignals');
+    return Array.isArray(response) ? response : [];
   } catch (e) {
     console.error(e);
+    return [];
   } finally {
     loading.value = false;
   }
-  return context;
 });
 
-onMounted(() => {
-  const appStore = useAppStore();
-  appStore.setCurrentSection('serviceActivity');
-  Cadenza.run(Cadenza.createRoutine('Init Signal Emissions', [fetchSignalsTask], ''), {});
+const signals = computed(() => data.value ?? []);
+
+const projectionState = useCadenzaProjectionState();
+const runtimeReady = useCadenzaRuntimeReady();
+
+watch(
+  runtimeReady,
+  (isReady) => {
+    if (refreshIntervalId !== null) {
+      window.clearInterval(refreshIntervalId);
+      refreshIntervalId = null;
+    }
+
+    if (!isReady || !import.meta.client) {
+      return;
+    }
+
+    refreshIntervalId = window.setInterval(() => {
+      if (!loading.value) {
+        refresh();
+      }
+    }, 10000);
+  },
+  { immediate: true },
+);
+
+watch(
+  () => projectionState.value.projectionState.activityVersion,
+  (_value, previousValue) => {
+    if (previousValue === undefined) {
+      return;
+    }
+    if (!loading.value) {
+      refresh();
+    }
+  },
+);
+
+onBeforeUnmount(() => {
+  if (refreshIntervalId !== null) {
+    window.clearInterval(refreshIntervalId);
+  }
 });
 </script>

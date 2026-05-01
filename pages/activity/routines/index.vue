@@ -21,17 +21,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAppStore } from '~/stores/app';
-import Cadenza from '@cadenza.io/service';
 
+const appStore = useAppStore();
 const router = useRouter();
-const routines = ref<any[]>([]);
 const hasMoreData = ref(false);
 const loadingMoreData = ref(false);
 const currentPage = ref(1);
 const pageSize = 50;
+let refreshIntervalId: number | null = null;
 
 const columns = [
   { name: 'name',     label: 'Name',           field: 'label',    align: 'left' as const, sortable: true },
@@ -49,43 +49,82 @@ function inspectInNewTab(r: any) {
   window.open(`/activity/routines/${r.uuid}`, '_blank');
 }
 
-const loadRoutinesTask = Cadenza.createTask('Load Routine Executions', async (context) => {
+function normalizeRoutines(data: any) {
+  const incoming = Array.isArray(data) ? data : [];
+  hasMoreData.value = incoming.length === pageSize;
+  return incoming;
+}
+
+appStore.setCurrentSection('serviceActivity');
+
+const {
+  data,
+  refresh,
+} = await useAsyncData('activity-routine-executions', async () => {
   currentPage.value = 1;
-  try {
-    const data: any = await $fetch(`/api/activity/routines/activeRoutines?page=1&limit=${pageSize}`);
-    routines.value = Array.isArray(data) ? data : [];
-    hasMoreData.value = routines.value.length === pageSize;
-  } catch (e) {
-    console.error(e);
-    hasMoreData.value = false;
-  }
-  return context;
+  const response = await $fetch(`/api/activity/routines/activeRoutines?page=1&limit=${pageSize}`);
+  return normalizeRoutines(response);
 });
 
-const loadMoreRoutinesTask = Cadenza.createTask('Load More Routine Executions', async (context) => {
+const routines = computed(() => data.value ?? []);
+
+const projectionState = useCadenzaProjectionState();
+const runtimeReady = useCadenzaRuntimeReady();
+
+watch(
+  runtimeReady,
+  (isReady) => {
+    if (refreshIntervalId !== null) {
+      window.clearInterval(refreshIntervalId);
+      refreshIntervalId = null;
+    }
+
+    if (!isReady || !import.meta.client) {
+      return;
+    }
+
+    refreshIntervalId = window.setInterval(() => {
+      if (!loadingMoreData.value) {
+        refresh();
+      }
+    }, 10000);
+  },
+  { immediate: true },
+);
+
+watch(
+  () => projectionState.value.projectionState.activityVersion,
+  (_value, previousValue) => {
+    if (previousValue === undefined) {
+      return;
+    }
+    if (!loadingMoreData.value) {
+      refresh();
+    }
+  },
+);
+
+onBeforeUnmount(() => {
+  if (refreshIntervalId !== null) {
+    window.clearInterval(refreshIntervalId);
+  }
+});
+
+async function loadMoreRoutines() {
+  if (loadingMoreData.value) {
+    return;
+  }
   loadingMoreData.value = true;
   currentPage.value++;
   try {
-    const data: any = await $fetch(`/api/activity/routines/activeRoutines?page=${currentPage.value}&limit=${pageSize}`);
-    const incoming = Array.isArray(data) ? data : [];
-    routines.value = [...routines.value, ...incoming];
-    hasMoreData.value = incoming.length === pageSize;
+    const response = await $fetch(`/api/activity/routines/activeRoutines?page=${currentPage.value}&limit=${pageSize}`);
+    const normalized = normalizeRoutines(response);
+    data.value = [...(data.value ?? []), ...normalized];
   } catch (e) {
     console.error(e);
     hasMoreData.value = false;
   } finally {
     loadingMoreData.value = false;
   }
-  return context;
-});
-
-async function loadMoreRoutines() {
-  Cadenza.run(loadMoreRoutinesTask, {});
 }
-
-onMounted(() => {
-  const appStore = useAppStore();
-  appStore.setCurrentSection('serviceActivity');
-  Cadenza.run(Cadenza.createRoutine('Init Routine Executions', [loadRoutinesTask], ''), {});
-});
 </script>

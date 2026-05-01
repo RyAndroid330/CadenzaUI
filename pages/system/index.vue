@@ -10,15 +10,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { onBeforeUnmount, ref, watch } from 'vue';
 import { useAppStore } from '~/stores/app';
 import { useRouter } from 'vue-router';
-import Cadenza from '@cadenza.io/service';
 
 const nodes = ref<any[]>([]);
 const edges = ref<any[]>([]);
 const appStore = useAppStore();
 const router = useRouter();
+let refreshIntervalId: number | null = null;
 
 function buildGraphNodes(data: any) {
   const result: any[] = [];
@@ -79,20 +79,56 @@ function buildGraphEdges(data: any) {
   return [...taskEdges, ...emitEdges, ...triggerEdges];
 }
 
-const fetchSystemMapTask = Cadenza.createTask('Fetch System Map', async (context) => {
+function applySystemGraph(data: any) {
   try {
-    const data: any = await $fetch('/api/system/graph');
     nodes.value = buildGraphNodes(data);
     edges.value = buildGraphEdges(data);
   } catch (e) {
     console.error('Error loading system map:', e);
   }
-  return context;
+}
+
+appStore.setCurrentSection('system');
+
+const { refresh } = await useAsyncData('system-graph', async () => {
+  const response: any = await $fetch('/api/system/graph');
+  applySystemGraph(response);
+  return true;
 });
 
-onMounted(async () => {
-  appStore.setCurrentSection('system');
-  Cadenza.run(Cadenza.createRoutine('Init System Map', [fetchSystemMapTask], ''), {});
+const projectionState = useCadenzaProjectionState();
+const runtimeReady = useCadenzaRuntimeReady();
+
+watch(
+  runtimeReady,
+  (isReady) => {
+    if (refreshIntervalId !== null) {
+      window.clearInterval(refreshIntervalId);
+      refreshIntervalId = null;
+    }
+    if (!isReady || !import.meta.client) {
+      return;
+    }
+    refreshIntervalId = window.setInterval(() => {
+      refresh();
+    }, 10000);
+  },
+  { immediate: true },
+);
+
+watch(
+  () => projectionState.value.projectionState.activityVersion,
+  (_value, previousValue) => {
+    if (previousValue !== undefined) {
+      refresh();
+    }
+  },
+);
+
+onBeforeUnmount(() => {
+  if (refreshIntervalId !== null) {
+    window.clearInterval(refreshIntervalId);
+  }
 });
 
 function handleNodeSelected(node: any) {

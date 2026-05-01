@@ -18,7 +18,7 @@
       <div v-show="!showMonthView">
         <apexchart
           type="heatmap"
-          height="500"
+          :height="props.chartHeight"
           :options="chartOptions"
           :series="chartSeries"
           @dataPointSelection="onCellClick"
@@ -262,6 +262,10 @@ const props = defineProps({
   serviceName: {
     type: String,
     default: undefined,
+  },
+  chartHeight: {
+    type: Number,
+    default: 500,
   },
 });
 
@@ -671,7 +675,7 @@ function applyRanges() {
 
 const chartOptions = computed(() => ({
   chart: {
-    height: 350,
+    height: props.chartHeight,
     type: 'heatmap',
     background: 'transparent',
   },

@@ -95,10 +95,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAppStore } from '~/stores/app';
-import Cadenza from '@cadenza.io/service';
 
 const route = useRoute();
 const router = useRouter();
@@ -107,6 +106,7 @@ const loading = ref(true);
 const traceData = ref<any>(null);
 const selectedTab = ref('map');
 const showGenerateDialog = ref(false);
+let refreshIntervalId: number | null = null;
 
 const nodes = computed(() => traceData.value?.nodes ?? []);
 const edges = computed(() => traceData.value?.edges ?? []);
@@ -187,21 +187,57 @@ function onNodeSelected(node: any) {
   }
 }
 
-const fetchTraceTask = Cadenza.createTask('Fetch Trace Data', async (context) => {
+async function loadAll() {
   const id = String(Array.isArray(route.params.id) ? route.params.id[0] : route.params.id);
   try {
     traceData.value = await $fetch(`/api/activity/traces/${id}`);
   } catch (e) { console.error(e); }
-  return context;
-});
+}
 
-onMounted(async () => {
-  appStore.setCurrentSection('serviceActivity');
+appStore.setCurrentSection('serviceActivity');
+
+const { refresh } = await useAsyncData(`activity-trace-detail:${String(Array.isArray(route.params.id) ? route.params.id[0] : route.params.id)}`, async () => {
   loading.value = true;
   try {
-    await Cadenza.run(Cadenza.createRoutine('Load Trace', [fetchTraceTask], ''), {});
+    await loadAll();
   } finally {
     loading.value = false;
+  }
+  return true;
+});
+
+const projectionState = useCadenzaProjectionState();
+const runtimeReady = useCadenzaRuntimeReady();
+
+watch(
+  runtimeReady,
+  (isReady) => {
+    if (refreshIntervalId !== null) {
+      window.clearInterval(refreshIntervalId);
+      refreshIntervalId = null;
+    }
+    if (!isReady || !import.meta.client) {
+      return;
+    }
+    refreshIntervalId = window.setInterval(() => {
+      refresh();
+    }, 10000);
+  },
+  { immediate: true },
+);
+
+watch(
+  () => projectionState.value.projectionState.activityVersion,
+  (_value, previousValue) => {
+    if (previousValue !== undefined) {
+      refresh();
+    }
+  },
+);
+
+onBeforeUnmount(() => {
+  if (refreshIntervalId !== null) {
+    window.clearInterval(refreshIntervalId);
   }
 });
 </script>

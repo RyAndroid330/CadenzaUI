@@ -1,3 +1,4 @@
+import { useRuntimeConfig } from '#imports';
 import { getQuery } from 'h3';
 import { delegateQuery } from '~/server/utils/cadenza/bridge';
 
@@ -44,3 +45,4 @@ export default defineEventHandler(async (event) => {
 
   return { data };
 });
+

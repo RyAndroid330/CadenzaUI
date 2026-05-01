@@ -22,17 +22,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useAppStore } from '~/stores/app';
 import { useRouter } from 'vue-router';
-import Cadenza from '@cadenza.io/service';
 
 const appStore = useAppStore();
 const router = useRouter();
-const instances = ref<any[]>([]);
 const mapNodes = ref<any[]>([]);
 const mapEdges = ref<any[]>([]);
 const mapLoading = ref(false);
+let refreshIntervalId: number | null = null;
 
 const columns = [
   { name: 'service',    label: 'Service',   field: 'service',    align: 'left' as const, sortable: true },
@@ -44,12 +43,10 @@ const columns = [
   { name: 'created',    label: 'Created',   field: 'created',    align: 'left' as const, sortable: true },
 ];
 
-const fetchActivityTask = Cadenza.createTask('Fetch Activity Servers', async (context) => {
+function buildActivityState(data: any) {
   mapLoading.value = true;
   try {
-    const data: any = await $fetch('/api/activity/servers');
     const list = data?.instances ?? [];
-    instances.value = list;
     const seen = new Set<string>();
     const nodes: any[] = [];
     for (const inst of list) {
@@ -67,23 +64,66 @@ const fetchActivityTask = Cadenza.createTask('Fetch Activity Servers', async (co
     }
     mapNodes.value = nodes;
     mapEdges.value = [];
+    return list;
   } catch (e) {
     console.error('Error fetching activity servers:', e);
+    return [];
   } finally {
     mapLoading.value = false;
   }
-  return context;
+}
+
+appStore.setCurrentSection('serviceActivity');
+
+const {
+  data,
+  refresh,
+} = await useAsyncData('activity-servers-overview', async () => {
+  const response: any = await $fetch('/api/activity/servers');
+  return buildActivityState(response);
+});
+
+const instances = computed(() => data.value ?? []);
+
+const projectionState = useCadenzaProjectionState();
+const runtimeReady = useCadenzaRuntimeReady();
+
+watch(
+  runtimeReady,
+  (isReady) => {
+    if (refreshIntervalId !== null) {
+      window.clearInterval(refreshIntervalId);
+      refreshIntervalId = null;
+    }
+    if (!isReady || !import.meta.client) {
+      return;
+    }
+    refreshIntervalId = window.setInterval(() => {
+      refresh();
+    }, 10000);
+  },
+  { immediate: true },
+);
+
+watch(
+  () => projectionState.value.projectionState.activityVersion,
+  (_value, previousValue) => {
+    if (previousValue !== undefined) {
+      refresh();
+    }
+  },
+);
+
+onBeforeUnmount(() => {
+  if (refreshIntervalId !== null) {
+    window.clearInterval(refreshIntervalId);
+  }
 });
 
 const onNodeSelected = (nodeId: string) => {
   const inst = instances.value.find((i) => i.uuid === nodeId);
   if (inst) router.push(`/activity/services/${inst.uuid}`);
 };
-
-onMounted(() => {
-  appStore.setCurrentSection('serviceActivity');
-  Cadenza.run(Cadenza.createRoutine('Load Activity', [fetchActivityTask], ''), {});
-});
 </script>
 
 <style scoped>

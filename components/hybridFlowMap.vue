@@ -243,7 +243,7 @@
 </template>
 
 <script setup>
-import { ref, watch, computed, onMounted, nextTick } from 'vue';
+import { ref, watch, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import { VueFlow } from '@vue-flow/core';
 import { MiniMap } from '@vue-flow/minimap';
 import ELK from 'elkjs/lib/elk.bundled.js';
@@ -315,7 +315,6 @@ const onNodeClick = (...args) => {
       (e) => idsToShow.has(e.source) && idsToShow.has(e.target)
     );
     filtered.value = true;
-    console.log('[NestedFlowMap] Filtered node IDs:', Array.from(idsToShow));
     emit('item-selected', clickedNode);
   }
   else if (clickedNode.nodeType === 'task') {
@@ -576,6 +575,29 @@ watch(hideRoutines, () => {
   }
 });
 
+function applyActiveState(nodesArr, activeNames, activeSignals, taskCounts = {}) {
+  const taskSet = new Set(activeNames);
+  const signalSet = new Set(activeSignals);
+  return nodesArr.map((node) => {
+    if (node.nodeType === 'task') {
+      const active = taskSet.has(node.id);
+      const activeCount = active ? (taskCounts[node.id] ?? 1) : undefined;
+      return { ...node, data: { ...node.data, isActive: active, activeCount } };
+    }
+    if (node.nodeType === 'signal') {
+      const signalName = node.id.startsWith('signal:') ? node.id.slice(7) : node.id;
+      return { ...node, data: { ...node.data, isActive: signalSet.has(signalName) } };
+    }
+    return node;
+  });
+}
+
+let keyHandler = null;
+
+onUnmounted(() => {
+  if (keyHandler) window.removeEventListener('keydown', keyHandler);
+});
+
 onMounted(async () => {
   typeof onNodeClick;
   await nextTick();
@@ -588,7 +610,7 @@ onMounted(async () => {
   } catch (err) {
   }
 
-  const keyHandler = (ev) => {
+  keyHandler = (ev) => {
     if (ev.code === 'Space') {
       // If filter is active, restore regardless of hover state
       if (filteredChain.value) {
@@ -636,10 +658,6 @@ onMounted(async () => {
   };
 
   window.addEventListener('keydown', keyHandler);
-
-  onUnmounted(() => {
-    window.removeEventListener('keydown', keyHandler);
-  });
 });
 
 const props = defineProps({
@@ -652,6 +670,18 @@ const props = defineProps({
     type: Array,
     required: true,
     default: () => [],
+  },
+  activeTaskNames: {
+    type: Array,
+    default: () => [],
+  },
+  activeSignalNames: {
+    type: Array,
+    default: () => [],
+  },
+  activeTaskCounts: {
+    type: Object,
+    default: () => ({}),
   },
 });
 
@@ -764,7 +794,7 @@ async function layoutFlatNodes(nodesArr, edgesArr) {
     layouted = await elk.layout(elkGraph);
   } catch (e) {
     console.error('ELK layout error, falling back to grid:', e);
-    return flatNodes.map((node, i) => ({
+    return flatNodes.map(({ parentNode, extent, expandParent, ...node }, i) => ({
       ...node,
       position: { x: (i % 8) * 160, y: Math.floor(i / 8) * 100 },
       width: node.nodeType === 'signal' ? 110 : 70,
@@ -773,7 +803,7 @@ async function layoutFlatNodes(nodesArr, edgesArr) {
   }
 
   return (layouted.children || []).map((layoutNode) => {
-    const originalNode = flatNodes.find((n) => n.id === layoutNode.id);
+    const { parentNode, extent, expandParent, ...originalNode } = flatNodes.find((n) => n.id === layoutNode.id);
     return {
       ...originalNode,
       position: { x: layoutNode.x ?? 0, y: layoutNode.y ?? 0 },
@@ -853,8 +883,6 @@ async function layoutNodes(nodesArr, edgesArr) {
         }),
     ];
 
-    console.log('[ELK Layout] Service children:', elkChildren);
-
     return {
       id: service.id,
       width: Math.max(600, elkChildren.length * 100),
@@ -869,69 +897,29 @@ async function layoutNodes(nodesArr, edgesArr) {
     };
   });
 
+  // Global signals (no service parent) placed as top-level ELK nodes
+  const globalSignalNodes = signals
+    .filter((s) => !s.parentNode)
+    .map((s) => ({ id: s.id, width: 110, height: 50, ...s }));
+
+  // Build set of all node IDs present in the ELK hierarchy for edge filtering
+  const elkHierarchyIds = new Set();
+  elkServices.forEach((svc) => {
+    elkHierarchyIds.add(svc.id);
+    (svc.children || []).forEach((child) => {
+      elkHierarchyIds.add(child.id);
+      (child.children || []).forEach((gc) => elkHierarchyIds.add(gc.id));
+    });
+  });
+  globalSignalNodes.forEach((s) => elkHierarchyIds.add(s.id));
+
   const elkEdges = edgesArr
-    .map((edge) => {
-      const sourceNode = nodesArr.find((n) => n.id === edge.source);
-      const targetNode = nodesArr.find((n) => n.id === edge.target);
-
-      if (!sourceNode || !targetNode) {
-        console.warn('[ELK Layout] Skipping edge due to missing nodes:', {
-          edge,
-          missingSource: !sourceNode,
-          missingTarget: !targetNode,
-        });
-        return null;
-      }
-
-      const isSignalEdge = Boolean(
-        (sourceNode.nodeType === 'signal') ||
-        (targetNode.nodeType === 'signal') ||
-        (sourceNode.signal) ||
-        (targetNode.signal) ||
-        (edge.data && edge.data.signal)
-      );
-
-      // Traffic will be set later in updateLayout
-      const traffic = edge.data?.traffic || 0;
-
-      // Determine edge styling based on traffic view
-      let edgeClass = '';
-      let edgeStyle = { strokeWidth: 2 };
-
-      if (trafficView.value && traffic > 0) {
-        // Traffic view enabled: use traffic color classes
-        if (traffic === 0) {
-          edgeClass = 'edge-traffic-neutral';
-        } else if (traffic < trafficThresholds.value.low) {
-          edgeClass = 'edge-traffic-low';
-        } else if (traffic < trafficThresholds.value.medium) {
-          edgeClass = 'edge-traffic-medium';
-        } else if (traffic < trafficThresholds.value.high) {
-          edgeClass = 'edge-traffic-high';
-        } else {
-          edgeClass = 'edge-traffic-max';
-        }
-      } else if (isSignalEdge) {
-        // Signal edges: use section color directly
-        edgeStyle.stroke = sectionNodeBg.value;
-      } else {
-        // Non-signal edges: use neutral class
-        edgeClass = 'edge-neutral';
-      }
-
-      return {
-        id: edge.id || `${edge.source}-${edge.target}`,
-        sources: [edge.source],
-        targets: [edge.target],
-        type: edge.type || 'default',
-        class: edgeClass,
-        style: edgeStyle,
-        data: { ...(edge.data || {}), signal: isSignalEdge, traffic },
-        animated: true,
-        ...edge,
-      };
-    })
-    .filter(Boolean);
+    .filter((edge) => elkHierarchyIds.has(edge.source) && elkHierarchyIds.has(edge.target))
+    .map((edge) => ({
+      id: edge.id || `${edge.source}-${edge.target}`,
+      sources: [edge.source],
+      targets: [edge.target],
+    }));
 
   const hierOpts = {
     'elk.algorithm': layoutAlgorithm.value,
@@ -952,23 +940,14 @@ async function layoutNodes(nodesArr, edgesArr) {
   const elkGraph = {
     id: 'root',
     layoutOptions: hierOpts,
-    children: [...elkServices],
+    children: [...elkServices, ...globalSignalNodes],
     edges: elkEdges,
   };
 
-  console.log('[ELK Graph Structure]:', elkGraph);
-
   const layouted = await elk.layout(elkGraph);
-
-  console.log('[ELK Layout Result]:', layouted);
 
   function flattenNodes(elkNode) {
     let flat = [];
-    if (elkNode.children) {
-      elkNode.children.forEach((child) => {
-        flat = flat.concat(flattenNodes(child));
-      });
-    }
     if (elkNode.id !== 'root') {
       const originalNode = nodesArr.find((n) => n.id === elkNode.id);
       flat.push({
@@ -981,6 +960,11 @@ async function layoutNodes(nodesArr, edgesArr) {
           service: originalNode.nodeType === 'service',
           routine: originalNode.nodeType === 'routine',
         },
+      });
+    }
+    if (elkNode.children) {
+      elkNode.children.forEach((child) => {
+        flat = flat.concat(flattenNodes(child));
       });
     }
     return flat;
@@ -1143,11 +1127,12 @@ async function updateLayout(newNodes, newEdges) {
           ...edge,
         };
       }).filter(Boolean);
-    laidOutNodes.value = nodes;
+    const activeNodes = applyActiveState(nodes, props.activeTaskNames, props.activeSignalNames, props.activeTaskCounts);
+    laidOutNodes.value = activeNodes;
     laidOutEdges.value = edges;
-    fullNodes = nodes;
+    fullNodes = activeNodes;
     fullEdges = edges;
-    displayedNodes.value = nodes;
+    displayedNodes.value = activeNodes;
     displayedEdges.value = edges;
 
     // Update edge states after layout
@@ -1181,6 +1166,16 @@ watch(
     filtered.value = false;
   },
   { immediate: true, deep: true }
+);
+
+watch(
+  () => [props.activeTaskNames, props.activeSignalNames, props.activeTaskCounts],
+  ([activeNames, activeSignals]) => {
+    displayedNodes.value = applyActiveState(displayedNodes.value, activeNames, activeSignals, props.activeTaskCounts);
+    fullNodes = applyActiveState(fullNodes, activeNames, activeSignals, props.activeTaskCounts);
+    laidOutNodes.value = applyActiveState(laidOutNodes.value, activeNames, activeSignals, props.activeTaskCounts);
+  },
+  { deep: true }
 );
 
 const showMiniMap = ref(false);
